@@ -1,0 +1,17 @@
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: 5
+  timeout: 5000
+
+development:
+  <<: *default
+  database: myneowallet
+  username: postgres
+  password: password 
+
+production:
+  <<: *default
+  database: myneowallet
+  username: <%= ENV["MYNEOWALLET_PG_USERNAME"] %>
+  password: <%= ENV["MYNEOWALLET_PG_PASSWORD"] %>

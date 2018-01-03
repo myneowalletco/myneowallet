@@ -1,0 +1,108 @@
+html {
+  height: 100%;
+}
+
+body {
+  min-height: 100%;
+  background-color: #F8F8F8;
+}
+
+header {
+  padding-left: 0;
+  padding-right: 0;
+  background-color: white;
+  border-top: 8px solid #8bc34a !important;
+  box-shadow: 0px 0px 5px 2px #BBB;
+  position: fixed;
+  width: 100%;
+  top: 0;
+  right: 0;
+  z-index: 1000;
+  nav {
+    max-width: 1140px;
+    width: 90%;
+    margin: 0 auto;
+    .navbar-brand {
+      font-family: Helvetica;
+      font-size: 1.7em;
+      color: black;
+      &:hover {
+        color: #927abf !important;
+      }
+    }
+  }
+}
+
+.card {
+  background-color: white;
+  box-shadow: 0px 1px 5px 0px rgba(0, 0, 0, 0.2), 0px 2px 2px 0px rgba(0, 0, 0, 0.14), 0px 3px 1px -2px rgba(0, 0, 0, 0.12);
+  border: none;
+  .-header {
+    padding: 12px;
+    font-size: 22px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.075);
+  }
+  .-body {
+    padding: 12px;
+  }
+}
+
+.card-padding {
+  padding: 24px;
+}
+
+.footer {
+  padding: 18px 0;
+  border-top: 1px solid #dde8e8;
+  position: absolute;
+  background-color: white;
+  bottom: 0;
+  width: 100%;
+  z-index: 1;
+  .-info-row {
+    margin-top: 24px;
+    .-desc {
+      font-size: 14px;
+      color: #555;
+    }
+    .-copyright {
+      margin-top: 12px;
+      font-size: 12.8px;
+      color: #555;
+    }
+    .-github {
+      margin-top: 12px;
+    }
+  }
+}
+
+.brand {
+  font-size: 1.7em;
+}
+
+.intro-card {
+  .-welcome {
+    font-size: 36px;
+  }
+  .-buttons {
+    margin-top: 24px;
+    font-size: 0;
+    button {
+      font-size: 18px;
+      margin-right: 8px;
+      cursor: pointer;
+    }
+  }
+}
+
+.wallet-core {
+  .row {
+    margin-bottom: 24px;
+  }
+}
+
+.warning {
+  font-family: 'Lato', sans-serif;
+  font-size: 22px;
+  font-weight: 300;
+}
