@@ -1,9 +1,3 @@
-$(function () {
-  window.header_height_margin = $('header').outerHeight() + 24;
-  $('body').css('padding-top', window.header_height_margin);
-  $footer = $(".footer");
-});
-
 var walletCore = (function () {
   var _netType = 'MainNet';
   var _address = null;
@@ -133,7 +127,83 @@ var walletCore = (function () {
     },
     initWallet: function (privateKeyWIF) {
       _privateKey = _getPrivateKeyFromWIF(privateKeyWIF);
-    },
-    getAddressFromPrivateKey: getAddressFromPrivateKey
+      _address = getAddressFromPrivateKey();
+      console.log("Wallet initialized - address: (" + _address + ")");
+      var $wallet_summary_card = $('.wallet-summary-card');
+      $wallet_summary_card.find('.-wallet-address').find('.-wallet-address-text').html(_address);
+      getBalance().then(function (balance) {
+        $wallet_summary_card.find('.-neo-balance').find('.-value').html(balance['NEO']['balance']);
+        $wallet_summary_card.find('.-gas-balance').find('.-value').html(balance['GAS']['balance']);
+      });
+      getClaims().then(function (claims) {
+        $wallet_summary_card.find('.-claim-gas').find('.-value').html(claims.total_claim);
+      });
+    }
   }
 })();
+
+var UI_MODES = [
+  'INTRO',
+  'NEW_WALLET',
+  'OPEN_WALLET'
+];
+var UI_MODE_DATA = {};
+UI_MODE_DATA[UI_MODES[0]] = { class: 'intro-card', action: 'action-intro' }
+UI_MODE_DATA[UI_MODES[1]] = { class: 'new-wallet-card', action: 'action-new-wallet' }
+UI_MODE_DATA[UI_MODES[2]] = { class: 'open-wallet-card', action: 'action-open-wallet' }
+UI_MODE_DATA[UI_MODES[3]] = { class: 'wallet-summary-card', action: 'action-wallet-summary' }
+var ui_mode = UI_MODES[0];
+
+function refresh_ui() {
+  $('.-wallet-core-child').hide();
+  $('.' + UI_MODE_DATA[ui_mode]['class']).show();
+}
+
+function switch_ui_mode(new_ui_mode) {
+  ui_mode = new_ui_mode;
+  refresh_ui();
+}
+
+function refresh_open_wallet_menu(value) {
+  $('.open-wallet-menu').hide();
+  if (value === 'private_key') {
+    $('.private-key-form').show();
+  }
+}
+
+$(function () {
+  window.header_height_margin = $('header').outerHeight() + 24;
+  $('body').css('padding-top', window.header_height_margin);
+  var $footer = $(".footer");
+  if ($footer.length > 0) {
+    $footer.css("bottom", -$footer.outerHeight()/2);
+    var $main = $("#main-container");
+    var original_padding_bottom = parseInt($main.css("padding-bottom"), 10);
+    $main.css("padding-bottom", original_padding_bottom + $footer.outerHeight()/2);
+    $(window).resize(function() {
+      $footer.css("bottom", -$footer.outerHeight()/2);
+      var $main = $("#main-container");
+      $main.css("padding-bottom", original_padding_bottom + $footer.outerHeight()/2);
+    });
+  }
+  refresh_ui();
+  for (var ui_mode in UI_MODE_DATA) {
+    $('.' + UI_MODE_DATA[ui_mode]['action']).click((function (ui_mode) {
+      return function () {
+        switch_ui_mode(ui_mode);
+      }
+    })(ui_mode));
+  }
+  $('input[type=radio][name=open_wallet_radio]').change(function() {
+    refresh_open_wallet_menu(this.value);
+  });
+  $('input[type=radio][name=open_wallet_radio][value=private_key]').attr('checked', true);
+  $('input[type=radio][name=open_wallet_radio][value=private_key]').change();
+  $('.private-key-form').submit(function () {
+    var $this = $(this);
+    walletCore.initWallet($this.find('.-private-key-value').val());
+    $this.find('.-private-key-value').val('');
+    switch_ui_mode(UI_MODES[3]);
+    return false;
+  });
+});

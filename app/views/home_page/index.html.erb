@@ -1,28 +1,24 @@
 <div class="wallet-core">
-  <div class="row">
-    <div class="col">
-      <div class="warning">
-        MyNEOWallet.com does not store your passwords and private keys. We cannot access accounts, recover keys, nor reverse transactions. It is recommended to bookmark MyNEOWallet.com or always check the URL diligently in case you find yourself on a phishing website. You are responsible for your security.
-      </div>
-    </div>
-  </div>
-
-  <div class="row intro-card">
+  <div class="row -wallet-core-child intro-card">
     <div class="col">
       <div class="card card-padding">
         <div class="-welcome">
-          Welcome
+          Wake up, Neo...
         </div>
         <div class="-buttons">
-          <button type="button" class="btn btn-primary btn-lg">NEW WALLET</button>
-          <button type="button" class="btn btn-outline-primary btn-lg">OPEN WALLET</button>
+          <button class="btn btn-primary btn-lg action-new-wallet">NEW WALLET</button>
+          <button class="btn btn-outline-primary btn-lg action-open-wallet">OPEN WALLET</button>
+        </div>
+        <div class="-warning">
+          MyNEOWallet.com does not store your passwords and private keys. We cannot access accounts, recover keys, nor reverse transactions. It is recommended to bookmark MyNEOWallet.com or always check the URL diligently in case you find yourself on a phishing website. You are responsible for your security.
         </div>
       </div>
     </div>
   </div>
 
-  <div class="row new-wallet-card">
+  <div class="row -wallet-core-child new-wallet-card">
     <div class="col">
+      <button class="btn btn-primary action-intro">BACK</button>
       <div class="card">
         <div class="-header">
           Create New Wallet
@@ -33,11 +29,89 @@
     </div>
   </div>
 
-  <div class="row open-wallet-card">
+  <div class="row -wallet-core-child open-wallet-card">
     <div class="col">
+      <button class="btn btn-primary action-intro">BACK</button>
       <div class="card">
         <div class="-header">
-          Open Wallet
+          How would you like to access your wallet?
+        </div>
+        <div class="-body">
+          <div class="row">
+            <div class="col-sm-4">
+              <div>
+                <form class="open-wallet-options-form">
+                  <div class="-option-parent">
+                    <input id="open_wallet_radio_1" name="open_wallet_radio" type="radio" value="private_key">
+                    <label for="open_wallet_radio_1">Private Key (WIF)</label>
+                  </div>
+                  <div class="-option-parent">
+                    <input id="open_wallet_radio_2" name="open_wallet_radio" type="radio" value="keystore_file">
+                    <label for="open_wallet_radio_2">Keystore File (UTC / JSON)</label>
+                  </div>
+                </form>
+              </div>
+            </div>
+            <div class="col-sm-8">
+              <form class="private-key-form open-wallet-menu">
+                <div class="form-group">
+                  <input name="private-key-wif" class="form-control -private-key-value" placeholder="Enter your WIF private key">
+                  <small class="form-text text-muted">MyNEOWallet will not share your private key with anyone else.</small>
+                </div>
+                <button type="submit" class="btn btn-primary">Submit</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row -wallet-core-child wallet-summary-card">
+    <div class="col">
+      <button class="btn btn-primary action-intro">CLOSE WALLET</button>
+      <div class="card">
+        <div class="-header">
+          Account Summary
+        </div>
+        <div class="-body -wallet-summary">
+          <div class="-metadata-group">
+            <div class="-label">Address</div>
+            <div class="-wallet-address"><img class="-neo-logo" src="<%= asset_path "logo.png" %>" height=40/> <span class="-wallet-address-text"></span></div>
+          </div>
+          <div class="-metadata-group">
+            <div class="-label">Balance</div>
+            <div class="-wallet-balance">
+              <span class="-neo-balance"><span class="-value">...</span> <span class="-asset-label">NEO</span></span>
+              <span class="-gas-balance"><span class="-value">...</span> <span class="-asset-label">GAS</span></span>
+            </div>
+          </div>
+        </div>
+        <div class="-separator"></div>
+        <div class="-body -wallet-summary">
+          <div class="-claim-gas">
+            <div class="-text">Claimable GAS: <span class="-value">...</span></div>
+            <button class="btn btn-primary">CLAIM</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="-header">
+          Transfer Assets
+        </div>
+        <div class="-body">
+        </div>
+      </div>
+      <div class="card">
+        <div class="-header">
+          Transactions
+        </div>
+        <div class="-body">
+        </div>
+      </div>
+      <div class="card">
+        <div class="-header">
+          Backup Wallet
         </div>
         <div class="-body">
         </div>
