@@ -442,6 +442,33 @@ var walletCore = (function (utils, components, exclusive, network) {
       return res;
     });
   }
+  var _refreshDisabledCounter = 2;
+  function _refreshWallet() {
+    if (_refreshDisabledCounter < 2) {
+      return;
+    }
+    _refreshDisabledCounter = 0;
+    var $wallet_summary_card = $('.wallet-summary-card');
+    $wallet_summary_card.find('.-wallet-address').find('.-wallet-address-text').html(_address);
+    $wallet_summary_card.find('.-neo-balance').find('.-value').html('...');
+    $wallet_summary_card.find('.-gas-balance').find('.-value').html('...');
+    $wallet_summary_card.find('.-claim-gas').find('.-value').html('...');
+    network.getBalance(_address).then(function (balance) {
+      _refreshDisabledCounter += 1;
+      if (_refreshDisabledCounter == 2) {
+        $wallet_summary_card.find('.-refresh-button').removeAttr("disabled");
+      }
+      $wallet_summary_card.find('.-neo-balance').find('.-value').html(balance.assets['NEO']['balance']);
+      $wallet_summary_card.find('.-gas-balance').find('.-value').html(balance.assets['GAS']['balance']);
+    });
+    network.getClaims(_address).then(function (claims) {
+      _refreshDisabledCounter += 1;
+      if (_refreshDisabledCounter == 2) {
+        $wallet_summary_card.find('.-refresh-button').removeAttr("disabled");
+      }
+      $wallet_summary_card.find('.-claim-gas').find('.-value').html(claims.total_claim);
+    });
+  }
   // https://github.com/neotracker/neotracker-wallet/blob/6c612de7f38c80689260112cb271804f063a6b1c/src/wallet/shared/neon/index.js
   return {
     doSendAsset: function (to, assetsToSend) {
@@ -454,16 +481,13 @@ var walletCore = (function (utils, components, exclusive, network) {
       _privateKey = utils.getPrivateKeyFromWIF(privateKeyWIF);
       _address = utils.getAddressFromPrivateKey(_privateKey);
       console.log("Wallet initialized - address: (" + _address + ")");
-      var $wallet_summary_card = $('.wallet-summary-card');
-      $wallet_summary_card.find('.-wallet-address').find('.-wallet-address-text').html(_address);
-      network.getBalance(_address).then(function (balance) {
-        $wallet_summary_card.find('.-neo-balance').find('.-value').html(balance.assets['NEO']['balance']);
-        $wallet_summary_card.find('.-gas-balance').find('.-value').html(balance.assets['GAS']['balance']);
+      $('.wallet-summary-card').find('.-refresh-button').click(function () {
+        $(this).attr('disabled', true);
+        _refreshWallet();
       });
-      network.getClaims(_address).then(function (claims) {
-        $wallet_summary_card.find('.-claim-gas').find('.-value').html(claims.total_claim);
-      });
-    }
+      _refreshWallet();
+    },
+    refreshWallet: _refreshWallet
   }
 })(utils, components, exclusive, network);
 

@@ -96,9 +96,13 @@ header {
   }
   .-wallet-core-child {
     display: none;
-  }
-  .action-intro {
-    margin-bottom: 12px;
+    .-buttons-parent {
+      font-size: 0;
+      margin-bottom: 12px;
+      button {
+        margin-right: 5px;
+      }
+    }
   }
   button {
     cursor: pointer;
