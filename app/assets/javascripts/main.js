@@ -2,18 +2,135 @@ var walletCore = (function () {
   var _netType = 'MainNet';
   var _address = null;
   var _privateKey = null;
-  var _privateKeyBytes = [];
+  var _ASSETS = {
+    NEO: 'NEO',
+    'c56f33fc6ecfcd0c225c4ab356fee59390af8560be0e930faebe74a6daff7c9b': 'NEO',
+    GAS: 'GAS',
+    '602c79718b16e442de58778e148d0b1084e3b2dffd5de6b7b16cee7969282de7': 'GAS'
+  };
+  var _ASSET_ID = {
+    NEO: 'c56f33fc6ecfcd0c225c4ab356fee59390af8560be0e930faebe74a6daff7c9b',
+    GAS: '602c79718b16e442de58778e148d0b1084e3b2dffd5de6b7b16cee7969282de7'
+  };
+  var _TX_VERSION = {
+    'CLAIM': 0,
+    'CONTRACT': 0,
+    'INVOCATION': 0
+  };
+  var BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+  var base58 = module.baseX(BASE58);
   function _dec2hex (dec) {
     return ('0' + dec.toString(16)).substr(-2)
   }
-  function _generatePrivateKeyBytes() {
-    var crypto_lib = window.crypto || window.msCrypto; // for IE 11
-    var arr = new Uint8Array(32);
-    crypto_lib.getRandomValues(arr);
-    for (var i = 0; i < arr.length; ++i) {
-      _privateKeyBytes[i] = arr[i];
+  function _reverseHex(hex) {
+    if (typeof hex !== 'string') throw new Error('reverseHex expects a string');
+    if (hex.length % 2 !== 0) throw new Error('Incorrect Length: ' + hex);
+    var out = '';
+    for (let i = hex.length - 2; i >= 0; i -= 2) {
+      out += hex.substr(i, 2)
     }
-    _privateKey = Array.from(arr, _dec2hex).join('');
+    return out;
+  }
+  function _getScriptHashFromAddress(address) {
+    var hash = ab2hexstring(base58.decode(address));
+    return _reverseHex(hash.substr(2, 40));
+  }
+  function _calculateInputs(balances, intents, gasCost) {
+    if (gasCost === undefined) {
+      gasCost = 0;
+    }
+    if (intents === null) intents = [];
+    var requiredAssets = intents.reduce(function(assets, intent) {
+      var fixed8Value = Math.round(intent.value * 100000000);
+      assets[intent.assetId] ? assets[intent.assetId] += fixed8Value : assets[intent.assetId] = fixed8Value;
+      return assets;
+    }, {});
+    if (gasCost > 0) {
+      var fixed8GasCost = gasCost * 100000000;
+      requiredAssets[_ASSET_ID.GAS] ? requiredAssets[_ASSET_ID.GAS] += fixed8GasCost : requiredAssets[ASSET_ID.GAS] = fixed8GasCost;
+    }
+    var change = [];
+    var inputs = Object.keys(requiredAssets).map(function(assetId) {
+      var requiredAmt = requiredAssets[assetId];
+      var assetSymbol = _ASSETS[assetId];
+      if (balances.assetSymbols.indexOf(assetSymbol) === -1) {
+        throw new Error('This balance does not contain any ' + assetSymbol + '!');
+      }
+      var assetBalance = balances.assets[assetSymbol];
+      if (assetBalance.balance * 100000000 < requiredAmt) {
+        throw new Error('Insufficient ' + _ASSETS[assetId] + '! Need ' + (requiredAmt / 100000000) + ' but only found ' + assetBalance.balance);
+      }
+      // Ascending order sort
+      assetBalance.unspent.sort(function(a, b) { return a.value - b.value });
+      var selectedInputs = 0;
+      var selectedAmt = 0;
+      // Selected min inputs to satisfy outputs
+      while (selectedAmt < requiredAmt) {
+        selectedInputs += 1;
+        if (selectedInputs > assetBalance.unspent.length) {
+          throw new Error('Insufficient ' + ASSETS[assetId] + '! Reached end of unspent coins!');
+        }
+        selectedAmt += Math.round(assetBalance.unspent[selectedInputs - 1].value * 100000000);
+      }
+      // Construct change output
+      if (selectedAmt > requiredAmt) {
+        change.push({
+          assetId,
+          value: (selectedAmt - requiredAmt) / 100000000,
+          scriptHash: _getScriptHashFromAddress(balances.address)
+        })
+      }
+      // Format inputs
+      return assetBalance.unspent.slice(0, selectedInputs).map(function(input) {
+        return { prevHash: input.txid, prevIndex: input.index }
+      });
+    }).reduce(function(prev, curr) { prev.concat(curr), [] });
+    return { inputs: inputs, change: change };
+  }
+  function Balance(bal) {
+    this.address = bal.address;
+    this.net = bal.net;
+    this.assetSymbols = bal.assetSymbols ? bal.assetSymbols : [];
+    this.assets = {};
+    this.tokenSymbols = bal.tokenSymbols ? bal.tokenSymbols : [];
+    this.tokens = bal.tokens ? bal.tokens : {};
+    this.addAsset = function (sym, assetBalance = { balance: 0, spent: [], unspent: [], unconfirmed: [] }) {
+      sym = sym.toUpperCase();
+      this.assetSymbols.push(sym);
+      var newBalance = Object.assign({ balance: 0, spent: [], unspent: [], unconfirmed: [] }, assetBalance);
+      this.assets[sym] = JSON.parse(JSON.stringify(newBalance));
+      return this;
+    }
+  }
+  function Transaction(config, type, data) {
+    var tx = Object.assign({
+      type: 128,
+      version: _TX_VERSION.CONTRACT,
+      attributes: [],
+      inputs: [],
+      outputs: [],
+      scripts: []
+    }, config)
+    this.type = tx.type;
+    this.version = tx.version;
+    this.attributes = tx.attributes;
+    this.inputs = tx.inputs;
+    this.outputs = tx.outputs;
+    this.calculate = function (balances) {
+      var result = _calculateInputs(balances, this.outputs, this.gas);
+      this.inputs = result.inputs;
+      this.outputs = this.outputs.concat(result.change);
+      return this;
+    }
+  }
+  function createContractTx(balances, intents, override = {}) {
+    if (intents === null) throw new Error('Useless transaction!');
+    var txConfig = Object.assign({
+      type: 128,
+      version: _TX_VERSION.CONTRACT,
+      outputs: intents
+    }, override);
+    return new Transaction(txConfig).calculate(balances);
   }
   function getAPIEndpoint(net) {
     switch(net) {
@@ -28,7 +145,20 @@ var walletCore = (function () {
   function getBalance() {
     var apiEndpoint = getAPIEndpoint(_netType);
     return axios.get(apiEndpoint + '/v2/address/balance/' + _address).then(function(res) {
-      return res.data;
+      var bal = new Balance({ _netType, address: res.data.address });
+      Object.keys(res.data).map(function(key) {
+        if (key === 'net' || key === 'address') return;
+        var parsedAsset = {
+          balance: +(res.data[key].balance).toFixed(8),
+          unspent: res.data[key].unspent.map(function(coin) {
+            coin.value = +(coin.value).toFixed(8)
+            return coin
+          })
+        }
+        bal.addAsset(key, parsedAsset);
+      });
+      Object.assign(bal, res.data);
+      return bal;
     });
   }
   function getClaims() {
@@ -49,6 +179,21 @@ var walletCore = (function () {
       return response.data.history
     });
   }
+  function doSendAsset(to, from, assetsToSend) {
+    var intents = Object.keys(assetsToSend).map(function (key) {
+      return {
+        assetId: _ASSET_ID[key],
+        value: assetsToSend[key],
+        scriptHash: _getScriptHashFromAddress(to)
+      }
+    });
+    return Promise.all([getRPCEndpoint(), getBalance()]).then(function (values) {
+      var endPoint = values[0];
+      var balance = values[1];
+      var unsignedTx = createContractTx(balance, intents);
+      console.log(unsignedTx);
+    });
+  }
   // https://github.com/neotracker/neotracker-wallet/blob/6c612de7f38c80689260112cb271804f063a6b1c/src/wallet/shared/neon/index.js
   function _getPublicKey(privateKey, encode) {
     var ecparams = module.ecurve.getCurveByName('secp256r1');
@@ -63,8 +208,6 @@ var walletCore = (function () {
   function _createSignatureScript(publicKeyEncoded) {
     return "21" + publicKeyEncoded.toString('hex') + "ac";
   }
-  var BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-  var base58 = module.baseX(BASE58);
   function _toAddress(programHash) {
     var data = new Uint8Array(1 + programHash.length);
     data.set([23]);
@@ -92,22 +235,18 @@ var walletCore = (function () {
   }
   function _getPrivateKeyFromWIF(privateKeyWIF) {
     var data = base58.decode(privateKeyWIF);
-
     if (data.length != 38 || data[0] != 0x80 || data[33] != 0x01) {
       // basic encoding errors
       return -1;
     }
-
     var dataHexString = module.CryptoJS.enc.Hex.parse(ab2hexstring(data.slice(0, data.length - 4)));
     var dataSha256 = module.CryptoJS.SHA256(dataHexString);
     var dataSha256_2 = module.CryptoJS.SHA256(dataSha256);
     var dataSha256Buffer = hexstring2ab(dataSha256_2.toString());
-
     if (ab2hexstring(dataSha256Buffer.slice(0, 4)) != ab2hexstring(data.slice(data.length - 4, data.length))) {
       //wif verify failed.
       return -2;
     }
-
     return data.slice(1, 33).toString("hex");
   }
   return {
@@ -116,6 +255,7 @@ var walletCore = (function () {
     getClaims: getClaims,
     getRPCEndpoint: getRPCEndpoint,
     getTransactionHistory: getTransactionHistory,
+    doSendAsset: doSendAsset,
     setNetType: function (net) {
       _netType = net;
     },
@@ -132,8 +272,8 @@ var walletCore = (function () {
       var $wallet_summary_card = $('.wallet-summary-card');
       $wallet_summary_card.find('.-wallet-address').find('.-wallet-address-text').html(_address);
       getBalance().then(function (balance) {
-        $wallet_summary_card.find('.-neo-balance').find('.-value').html(balance['NEO']['balance']);
-        $wallet_summary_card.find('.-gas-balance').find('.-value').html(balance['GAS']['balance']);
+        $wallet_summary_card.find('.-neo-balance').find('.-value').html(balance.assets['NEO']['balance']);
+        $wallet_summary_card.find('.-gas-balance').find('.-value').html(balance.assets['GAS']['balance']);
       });
       getClaims().then(function (claims) {
         $wallet_summary_card.find('.-claim-gas').find('.-value').html(claims.total_claim);
