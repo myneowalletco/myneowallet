@@ -13,7 +13,7 @@ var network = (function () {
     this.parse = null;
     this.execute = function(url) {
       if (this.completed) throw new Error('This request has been sent');
-      return queryRPC(url, this.req).then(function(res) {
+      return _queryRPC(url, this.req).then(function(res) {
         this.res = res;
         this.completed = true;
         if (res.error) {
@@ -26,9 +26,16 @@ var network = (function () {
       });
     }
   }
+  function _sendRawTransaction(serializedTransaction) {
+    return new _Query({
+      method: 'sendrawtransaction',
+      params: [serializedTransaction]
+    });
+  }
   return {
     Query: _Query,
-    queryRPC: _queryRPC
+    queryRPC: _queryRPC,
+    sendRawTransaction: _sendRawTransaction
   }
 })();
 
@@ -141,7 +148,7 @@ var walletCore = (function (components, exclusive, network) {
     return reverseHex(hash.substr(2, 40));
   }
   function _generateSignature(tx, privateKey) {
-    var msgHash = sha256(tx)
+    var msgHash = sha256(tx);
     var msgHashHex = module.Buffer.from(msgHash, 'hex');
     var elliptic = new module.ec('p256');
     var sig = elliptic.sign(msgHashHex, privateKey, null);
@@ -156,7 +163,7 @@ var walletCore = (function (components, exclusive, network) {
   }
   function _serializeTransaction(tx, signed) {
     if (signed === undefined) {
-      signed = false;
+      signed = true;
     }
     var out = '';
     out += num2hexstring(tx.type);
@@ -247,7 +254,7 @@ var walletCore = (function (components, exclusive, network) {
     return { inputs: inputs, change: change };
   }
   function _signTransaction(transaction, privateKey) {
-    if (!isPrivateKey(privateKey)) throw new Error('Key provided does not look like a private key!');
+    if (!_isPrivateKey(privateKey)) throw new Error('Key provided does not look like a private key!');
     var invocationScript = '40' + _generateSignature(_serializeTransaction(transaction, false), privateKey);
     var verificationScript = _getVerificationScriptFromPublicKey(_getPublicKey(privateKey));
     var witness = { invocationScript: invocationScript, verificationScript: verificationScript };
@@ -362,12 +369,12 @@ var walletCore = (function (components, exclusive, network) {
     return Promise.all([getRPCEndpoint(), getBalance()]).then(function (values) {
       endPoint = values[0];
       var balance = values[1];
-      unsignedTx = createContractTx(balance, intents);
+      var unsignedTx = createContractTx(balance, intents);
       return unsignedTx.sign(_privateKey);
     }).then(function (signedResult) {
-      var signedTx = signedResult;
-      return Query.sendRawTransaction(signedTx).execute(endPoint);
-    }).then(function () {
+      signedTx = signedResult;
+      return network.sendRawTransaction(_serializeTransaction(signedTx)).execute(endPoint);
+    }).then(function (res) {
       if (res.result === true) {
         res.txid = signedTx.hash;
       }
