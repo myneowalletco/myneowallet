@@ -1,4 +1,107 @@
-var walletCore = (function () {
+var network = (function () {
+  var _DEFAULT_REQ = { jsonrpc: '2.0', method: 'getblockcount', params: [], id: 1234 };
+  function _queryRPC(url, req) {
+    var jsonRequest = axios.create({ headers: { 'Content-Type': 'application/json' } })
+    var jsonRpcData = Object.assign({}, _DEFAULT_REQ, req);
+    return jsonRequest.post(url, jsonRpcData).then(function(response) {
+      return response.data;
+    });
+  }
+  function _Query (req) {
+    this.req = Object.assign({}, _DEFAULT_REQ, req);
+    this.completed = false;
+    this.parse = null;
+    this.execute = function(url) {
+      if (this.completed) throw new Error('This request has been sent');
+      return queryRPC(url, this.req).then(function(res) {
+        this.res = res;
+        this.completed = true;
+        if (res.error) {
+          throw new Error(res.error.message);
+        }
+        if (this.parse) {
+          return this.parse(res);
+        }
+        return res;
+      });
+    }
+  }
+  return {
+    Query: _Query,
+    queryRPC: _queryRPC
+  }
+})();
+
+var components = (function () {
+  var _maxTransactionAttributeSize = 65535;
+  var serializeTransactionInput = function(input) {
+    return reverseHex(input.prevHash) + reverseHex(num2hexstring(input.prevIndex, 2));
+  }
+  var serializeTransactionAttribute = function(attr) {
+    if (attr.data.length > _maxTransactionAttributeSize) throw new Error();
+    var out = num2hexstring(attr.usage);
+    if (attr.usage === 0x81) {
+      out += num2hexstring(attr.data.length / 2);
+    } else if (attr.usage === 0x90 || attr.usage >= 0xf0) {
+      out += num2VarInt(attr.data.length / 2);
+    }
+    if (attr.usage === 0x02 || attr.usage === 0x03) {
+      out += attr.data.substr(2, 64);
+    } else {
+      out += attr.data;
+    }
+    return out;
+  }
+  var serializeTransactionOutput = function(output) {
+    var value = num2fixed8(output.value);
+    return reverseHex(output.assetId) + value + reverseHex(output.scriptHash);
+  }
+  var serializeWitness = function(witness) {
+    const invoLength = num2VarInt(witness.invocationScript.length / 2);
+    const veriLength = num2VarInt(witness.verificationScript.length / 2);
+    return invoLength + witness.invocationScript + veriLength + witness.verificationScript;
+  }
+  return {
+    serializeTransactionInput: serializeTransactionInput,
+    serializeTransactionAttribute: serializeTransactionAttribute,
+    serializeTransactionOutput: serializeTransactionOutput,
+    serializeWitness: serializeWitness
+  }
+})();
+
+var exclusive = (function (components) {
+  var _serializeClaimExclusive = function(tx) {
+    if (tx.type !== 0x02) throw new Error()
+    var out = num2VarInt(tx.claims.length);
+    for (var idx in tx.claims) {
+      var claim = tx.claims[idx];
+      out += components.serializeTransactionInput(claim);
+    }
+    return out;
+  }
+  var _serializeContractExclusive = function(tx) {
+    if (tx.type !== 0x80) throw new Error();
+    return '';
+  }
+  var _serializeInvocationExclusive = function(tx) {
+    if (tx.type !== 0xd1) throw new Error();
+    var out = num2VarInt(tx.script.length / 2);
+    out += tx.script;
+    if (tx.version >= 1) {
+      out += num2fixed8(tx.gas);
+    }
+    return out;
+  }
+  var _serializeExclusive = {}
+  _serializeExclusive[2] = _serializeClaimExclusive;
+  _serializeExclusive[128] = _serializeContractExclusive;
+  _serializeExclusive[209] = _serializeInvocationExclusive;
+  return {
+    serializeExclusive: _serializeExclusive
+  }
+})(components);
+
+var walletCore = (function (components, exclusive, network) {
   var _netType = 'MainNet';
   var _address = null;
   var _privateKey = null;
@@ -19,21 +122,77 @@ var walletCore = (function () {
   };
   var BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
   var base58 = module.baseX(BASE58);
+  function _isPrivateKey(privateKey) {
+    return /^[0-9A-Fa-f]{64}$/.test(privateKey);
+  }
+  function _isPrivateKeyWIF(wif) {
+    try {
+      if (wif.length !== 52) return false;
+      var hexStr = ab2hexstring(base58.decode(wif));
+      var shaChecksum = hash256(hexStr.substr(0, hexStr.length - 8)).substr(0, 8);
+      return shaChecksum === hexStr.substr(hexStr.length - 8, 8);
+    } catch (e) { return false };
+  }
   function _dec2hex (dec) {
     return ('0' + dec.toString(16)).substr(-2)
   }
-  function _reverseHex(hex) {
-    if (typeof hex !== 'string') throw new Error('reverseHex expects a string');
-    if (hex.length % 2 !== 0) throw new Error('Incorrect Length: ' + hex);
+  function _getScriptHashFromAddress(address) {
+    var hash = ab2hexstring(base58.decode(address));
+    return reverseHex(hash.substr(2, 40));
+  }
+  function _generateSignature(tx, privateKey) {
+    var msgHash = sha256(tx)
+    var msgHashHex = module.Buffer.from(msgHash, 'hex');
+    var elliptic = new module.ec('p256');
+    var sig = elliptic.sign(msgHashHex, privateKey, null);
+    var signature = module.Buffer.concat([
+      sig.r.toArrayLike(module.Buffer, 'be', 32),
+      sig.s.toArrayLike(module.Buffer, 'be', 32)
+    ]);
+    return signature.toString('hex');
+  }
+  function _getVerificationScriptFromPublicKey(publicKeyEncoded) {
+    return '21' + publicKeyEncoded.toString('hex') + 'ac';
+  }
+  function _serializeTransaction(tx, signed) {
+    if (signed === undefined) {
+      signed = false;
+    }
     var out = '';
-    for (let i = hex.length - 2; i >= 0; i -= 2) {
-      out += hex.substr(i, 2)
+    out += num2hexstring(tx.type);
+    out += num2hexstring(tx.version);
+    out += exclusive.serializeExclusive[tx.type](tx);
+    out += num2VarInt(tx.attributes.length);
+    for (var idx in tx.attributes) {
+      var attribute = tx.attributes[idx];
+      out += components.serializeTransactionAttribute(attribute);
+    }
+    out += num2VarInt(tx.inputs.length);
+    for (var idx in tx.inputs) {
+      var input = tx.inputs[idx];
+      out += components.serializeTransactionInput(input);
+    }
+    out += num2VarInt(tx.outputs.length)
+    for (var idx in tx.outputs) {
+      var output = tx.outputs[idx];
+      out += components.serializeTransactionOutput(output);
+    }
+    if (signed && tx.scripts && tx.scripts.length > 0) {
+      out += num2VarInt(tx.scripts.length)
+      for (var idx in tx.scripts) {
+        var script = tx.scripts[idx];
+        out += components.serializeWitness(script);
+      }
     }
     return out;
   }
-  function _getScriptHashFromAddress(address) {
-    var hash = ab2hexstring(base58.decode(address));
-    return _reverseHex(hash.substr(2, 40));
+  function _getPublicKey(privateKey, encode) {
+    if (encode === undefined) {
+      encode = true;
+    }
+    var ecparams = module.ecurve.getCurveByName('secp256r1');
+    var curvePt = ecparams.G.multiply(module.BigInteger.fromBuffer(hexstring2ab(privateKey)));
+    return curvePt.getEncoded(encode);
   }
   function _calculateInputs(balances, intents, gasCost) {
     if (gasCost === undefined) {
@@ -87,6 +246,14 @@ var walletCore = (function () {
     }).reduce(function(prev, curr) { prev.concat(curr), [] });
     return { inputs: inputs, change: change };
   }
+  function _signTransaction(transaction, privateKey) {
+    if (!isPrivateKey(privateKey)) throw new Error('Key provided does not look like a private key!');
+    var invocationScript = '40' + _generateSignature(_serializeTransaction(transaction, false), privateKey);
+    var verificationScript = _getVerificationScriptFromPublicKey(_getPublicKey(privateKey));
+    var witness = { invocationScript: invocationScript, verificationScript: verificationScript };
+    transaction.scripts ? transaction.scripts.push(witness) : transaction.scripts = [witness];
+    return transaction;
+  }
   function Balance(bal) {
     this.address = bal.address;
     this.net = bal.net;
@@ -121,6 +288,9 @@ var walletCore = (function () {
       this.inputs = result.inputs;
       this.outputs = this.outputs.concat(result.change);
       return this;
+    }
+    this.sign = function(privateKey) {
+      return _signTransaction(this, privateKey);
     }
   }
   function createContractTx(balances, intents, override = {}) {
@@ -187,27 +357,24 @@ var walletCore = (function () {
         scriptHash: _getScriptHashFromAddress(to)
       }
     });
+    var signedTx = null;
+    var endPoint = null;
     return Promise.all([getRPCEndpoint(), getBalance()]).then(function (values) {
-      var endPoint = values[0];
+      endPoint = values[0];
       var balance = values[1];
-      var unsignedTx = createContractTx(balance, intents);
-      console.log(unsignedTx);
+      unsignedTx = createContractTx(balance, intents);
+      return unsignedTx.sign(_privateKey);
+    }).then(function (signedResult) {
+      var signedTx = signedResult;
+      return Query.sendRawTransaction(signedTx).execute(endPoint);
+    }).then(function () {
+      if (res.result === true) {
+        res.txid = signedTx.hash;
+      }
+      return res;
     });
   }
   // https://github.com/neotracker/neotracker-wallet/blob/6c612de7f38c80689260112cb271804f063a6b1c/src/wallet/shared/neon/index.js
-  function _getPublicKey(privateKey, encode) {
-    var ecparams = module.ecurve.getCurveByName('secp256r1');
-    var curvePt = ecparams.G.multiply(module.BigInteger.fromBuffer(hexstring2ab(privateKey)));
-    return curvePt.getEncoded(encode);
-  }
-  function _getHash(signatureScript) {
-    var programHexString = module.CryptoJS.enc.Hex.parse(signatureScript);
-    var programSha256 = module.CryptoJS.SHA256(programHexString);
-    return module.CryptoJS.RIPEMD160(programSha256);
-  }
-  function _createSignatureScript(publicKeyEncoded) {
-    return "21" + publicKeyEncoded.toString('hex') + "ac";
-  }
   function _toAddress(programHash) {
     var data = new Uint8Array(1 + programHash.length);
     data.set([23]);
@@ -227,9 +394,9 @@ var walletCore = (function () {
   function getAddressFromPrivateKey() {
     var accounts = [];
     var publicKeyEncoded = _getPublicKey(_privateKey, true);
-    var publicKeyHash = _getHash(publicKeyEncoded.toString('hex'));
-    var script = _createSignatureScript(publicKeyEncoded);
-    var programHash = _getHash(script);
+    var publicKeyHash = hash160(publicKeyEncoded.toString('hex'));
+    var script = _getVerificationScriptFromPublicKey(publicKeyEncoded);
+    var programHash = hash160(script);
     var address = _toAddress(hexstring2ab(programHash.toString()));
     return address;
   }
@@ -280,7 +447,7 @@ var walletCore = (function () {
       });
     }
   }
-})();
+})(components, exclusive, network);
 
 var UI_MODES = [
   'INTRO',
