@@ -1,5 +1,147 @@
+function Balance(bal) {
+  this.address = bal.address;
+  this.net = bal.net;
+  this.assetSymbols = bal.assetSymbols ? bal.assetSymbols : [];
+  this.assets = {};
+  this.tokenSymbols = bal.tokenSymbols ? bal.tokenSymbols : [];
+  this.tokens = bal.tokens ? bal.tokens : {};
+  this.addAsset = function (sym, assetBalance = { balance: 0, spent: [], unspent: [], unconfirmed: [] }) {
+    sym = sym.toUpperCase();
+    this.assetSymbols.push(sym);
+    var newBalance = Object.assign({ balance: 0, spent: [], unspent: [], unconfirmed: [] }, assetBalance);
+    this.assets[sym] = JSON.parse(JSON.stringify(newBalance));
+    return this;
+  }
+}
+
+var utils = (function () {
+  var _BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+  var _base58 = module.baseX(_BASE58);
+  function _isPrivateKey(privateKey) {
+    return /^[0-9A-Fa-f]{64}$/.test(privateKey);
+  }
+  function _isPrivateKeyWIF(wif) {
+    try {
+      if (wif.length !== 52) return false;
+      var hexStr = ab2hexstring(_base58.decode(wif));
+      var shaChecksum = hash256(hexStr.substr(0, hexStr.length - 8)).substr(0, 8);
+      return shaChecksum === hexStr.substr(hexStr.length - 8, 8);
+    } catch (e) { return false };
+  }
+  function _getScriptHashFromAddress(address) {
+    var hash = ab2hexstring(_base58.decode(address));
+    return reverseHex(hash.substr(2, 40));
+  }
+  function _getPrivateKeyFromWIF(privateKeyWIF) {
+    var data = _base58.decode(privateKeyWIF);
+    if (data.length != 38 || data[0] != 0x80 || data[33] != 0x01) {
+      // basic encoding errors
+      return -1;
+    }
+    var dataHexString = module.CryptoJS.enc.Hex.parse(ab2hexstring(data.slice(0, data.length - 4)));
+    var dataSha256 = module.CryptoJS.SHA256(dataHexString);
+    var dataSha256_2 = module.CryptoJS.SHA256(dataSha256);
+    var dataSha256Buffer = hexstring2ab(dataSha256_2.toString());
+    if (ab2hexstring(dataSha256Buffer.slice(0, 4)) != ab2hexstring(data.slice(data.length - 4, data.length))) {
+      //wif verify failed.
+      return -2;
+    }
+    return data.slice(1, 33).toString("hex");
+  }
+  function _getVerificationScriptFromPublicKey(publicKeyEncoded) {
+    return '21' + publicKeyEncoded.toString('hex') + 'ac';
+  }
+  function _toAddress(programHash) {
+    var data = new Uint8Array(1 + programHash.length);
+    data.set([23]);
+    data.set(programHash, 1);
+    var programHexString = module.CryptoJS.enc.Hex.parse(ab2hexstring(data));
+    var programSha256 = module.CryptoJS.SHA256(programHexString);
+    var programSha256_2 = module.CryptoJS.SHA256(programSha256);
+    var programSha256Buffer = hexstring2ab(programSha256_2.toString());
+    var datas = new Uint8Array(1 + programHash.length + 4);
+    datas.set(data);
+    datas.set(programSha256Buffer.slice(0, 4), 21);
+    return _base58.encode(datas);
+  }
+  function _getPublicKeyFromPrivateKey(privateKey, encode) {
+    if (encode === undefined) {
+      encode = true;
+    }
+    var ecparams = module.ecurve.getCurveByName('secp256r1');
+    var curvePt = ecparams.G.multiply(module.BigInteger.fromBuffer(hexstring2ab(privateKey)));
+    return curvePt.getEncoded(encode);
+  }
+  function _getAddressFromPrivateKey(privateKey) {
+    var accounts = [];
+    var publicKeyEncoded = _getPublicKeyFromPrivateKey(privateKey, true);
+    var publicKeyHash = hash160(publicKeyEncoded.toString('hex'));
+    var script = _getVerificationScriptFromPublicKey(publicKeyEncoded);
+    var programHash = hash160(script);
+    var address = _toAddress(hexstring2ab(programHash.toString()));
+    return address;
+  }
+  return {
+    getPrivateKeyFromWIF: _getPrivateKeyFromWIF,
+    getAddressFromPrivateKey: _getAddressFromPrivateKey,
+    getVerificationScriptFromPublicKey: _getVerificationScriptFromPublicKey,
+    getPublicKeyFromPrivateKey: _getPublicKeyFromPrivateKey,
+    isPrivateKey: _isPrivateKey,
+    getScriptHashFromAddress: _getScriptHashFromAddress,
+    base58: _base58
+  }
+})();
+
 var network = (function () {
   var _DEFAULT_REQ = { jsonrpc: '2.0', method: 'getblockcount', params: [], id: 1234 };
+  var _netType = 'MainNet';
+  function _getAPIEndpoint(net) {
+    switch(net) {
+      case 'MainNet':
+        return 'http://api.wallet.cityofzion.io'
+      case 'TestNet':
+        return 'http://testnet-api.wallet.cityofzion.io'
+      default:
+        return net
+    }
+  }
+  function _getBalance(address) {
+    var apiEndpoint = _getAPIEndpoint(_netType);
+    return axios.get(apiEndpoint + '/v2/address/balance/' + address).then(function(res) {
+      var bal = new Balance({ _netType, address: res.data.address });
+      Object.keys(res.data).map(function(key) {
+        if (key === 'net' || key === 'address') return;
+        var parsedAsset = {
+          balance: +(res.data[key].balance).toFixed(8),
+          unspent: res.data[key].unspent.map(function(coin) {
+            coin.value = +(coin.value).toFixed(8)
+            return coin
+          })
+        }
+        bal.addAsset(key, parsedAsset);
+      });
+      Object.assign(bal, res.data);
+      return bal;
+    });
+  }
+  function _getClaims(address) {
+    var apiEndpoint = _getAPIEndpoint(_netType);
+    return axios.get(apiEndpoint + '/v2/address/claims/' + address).then(function(res) {
+      return res.data
+    });
+  }
+  function _getRPCEndpoint() {
+    var apiEndpoint = _getAPIEndpoint(_netType);
+    return axios.get(apiEndpoint + '/v2/network/best_node').then(function(response) {
+      return response.data.node
+    });
+  }
+  function _getTransactionHistory(address) {
+    var apiEndpoint = _getAPIEndpoint(_netType);
+    return axios.get(apiEndpoint + '/v2/address/history/' + address).then(function(response) {
+      return response.data.history
+    });
+  }
   function _queryRPC(url, req) {
     var jsonRequest = axios.create({ headers: { 'Content-Type': 'application/json' } })
     var jsonRpcData = Object.assign({}, _DEFAULT_REQ, req);
@@ -33,18 +175,29 @@ var network = (function () {
     });
   }
   return {
+    getAPIEndpoint: _getAPIEndpoint,
+    getBalance: _getBalance,
+    getClaims: _getClaims,
+    getRPCEndpoint: _getRPCEndpoint,
+    getTransactionHistory: _getTransactionHistory,
     Query: _Query,
     queryRPC: _queryRPC,
-    sendRawTransaction: _sendRawTransaction
+    sendRawTransaction: _sendRawTransaction,
+    setNetType: function(net) {
+      _netType = net;
+    },
+    getNetType: function() {
+      return _netType;
+    }
   }
 })();
 
 var components = (function () {
   var _maxTransactionAttributeSize = 65535;
-  var serializeTransactionInput = function(input) {
+  var _serializeTransactionInput = function(input) {
     return reverseHex(input.prevHash) + reverseHex(num2hexstring(input.prevIndex, 2));
   }
-  var serializeTransactionAttribute = function(attr) {
+  var _serializeTransactionAttribute = function(attr) {
     if (attr.data.length > _maxTransactionAttributeSize) throw new Error();
     var out = num2hexstring(attr.usage);
     if (attr.usage === 0x81) {
@@ -59,20 +212,53 @@ var components = (function () {
     }
     return out;
   }
-  var serializeTransactionOutput = function(output) {
+  var _serializeTransactionOutput = function(output) {
     var value = num2fixed8(output.value);
     return reverseHex(output.assetId) + value + reverseHex(output.scriptHash);
   }
-  var serializeWitness = function(witness) {
+  var _serializeWitness = function(witness) {
     const invoLength = num2VarInt(witness.invocationScript.length / 2);
     const veriLength = num2VarInt(witness.verificationScript.length / 2);
     return invoLength + witness.invocationScript + veriLength + witness.verificationScript;
   }
+  var _serializeTransaction = function(tx, signed) {
+    if (signed === undefined) {
+      signed = true;
+    }
+    var out = '';
+    out += num2hexstring(tx.type);
+    out += num2hexstring(tx.version);
+    out += exclusive.serializeExclusive[tx.type](tx);
+    out += num2VarInt(tx.attributes.length);
+    for (var idx in tx.attributes) {
+      var attribute = tx.attributes[idx];
+      out += _serializeTransactionAttribute(attribute);
+    }
+    out += num2VarInt(tx.inputs.length);
+    for (var idx in tx.inputs) {
+      var input = tx.inputs[idx];
+      out += _serializeTransactionInput(input);
+    }
+    out += num2VarInt(tx.outputs.length)
+    for (var idx in tx.outputs) {
+      var output = tx.outputs[idx];
+      out += _serializeTransactionOutput(output);
+    }
+    if (signed && tx.scripts && tx.scripts.length > 0) {
+      out += num2VarInt(tx.scripts.length)
+      for (var idx in tx.scripts) {
+        var script = tx.scripts[idx];
+        out += _serializeWitness(script);
+      }
+    }
+    return out;
+  }
   return {
-    serializeTransactionInput: serializeTransactionInput,
-    serializeTransactionAttribute: serializeTransactionAttribute,
-    serializeTransactionOutput: serializeTransactionOutput,
-    serializeWitness: serializeWitness
+    serializeTransactionInput: _serializeTransactionInput,
+    serializeTransactionAttribute: _serializeTransactionAttribute,
+    serializeTransactionOutput: _serializeTransactionOutput,
+    serializeWitness: _serializeWitness,
+    serializeTransaction: _serializeTransaction
   }
 })();
 
@@ -108,7 +294,7 @@ var exclusive = (function (components) {
   }
 })(components);
 
-var walletCore = (function (components, exclusive, network) {
+var walletCore = (function (utils, components, exclusive, network) {
   var _netType = 'MainNet';
   var _address = null;
   var _privateKey = null;
@@ -127,26 +313,6 @@ var walletCore = (function (components, exclusive, network) {
     'CONTRACT': 0,
     'INVOCATION': 0
   };
-  var BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-  var base58 = module.baseX(BASE58);
-  function _isPrivateKey(privateKey) {
-    return /^[0-9A-Fa-f]{64}$/.test(privateKey);
-  }
-  function _isPrivateKeyWIF(wif) {
-    try {
-      if (wif.length !== 52) return false;
-      var hexStr = ab2hexstring(base58.decode(wif));
-      var shaChecksum = hash256(hexStr.substr(0, hexStr.length - 8)).substr(0, 8);
-      return shaChecksum === hexStr.substr(hexStr.length - 8, 8);
-    } catch (e) { return false };
-  }
-  function _dec2hex (dec) {
-    return ('0' + dec.toString(16)).substr(-2)
-  }
-  function _getScriptHashFromAddress(address) {
-    var hash = ab2hexstring(base58.decode(address));
-    return reverseHex(hash.substr(2, 40));
-  }
   function _generateSignature(tx, privateKey) {
     var msgHash = sha256(tx);
     var msgHashHex = module.Buffer.from(msgHash, 'hex');
@@ -157,49 +323,6 @@ var walletCore = (function (components, exclusive, network) {
       sig.s.toArrayLike(module.Buffer, 'be', 32)
     ]);
     return signature.toString('hex');
-  }
-  function _getVerificationScriptFromPublicKey(publicKeyEncoded) {
-    return '21' + publicKeyEncoded.toString('hex') + 'ac';
-  }
-  function _serializeTransaction(tx, signed) {
-    if (signed === undefined) {
-      signed = true;
-    }
-    var out = '';
-    out += num2hexstring(tx.type);
-    out += num2hexstring(tx.version);
-    out += exclusive.serializeExclusive[tx.type](tx);
-    out += num2VarInt(tx.attributes.length);
-    for (var idx in tx.attributes) {
-      var attribute = tx.attributes[idx];
-      out += components.serializeTransactionAttribute(attribute);
-    }
-    out += num2VarInt(tx.inputs.length);
-    for (var idx in tx.inputs) {
-      var input = tx.inputs[idx];
-      out += components.serializeTransactionInput(input);
-    }
-    out += num2VarInt(tx.outputs.length)
-    for (var idx in tx.outputs) {
-      var output = tx.outputs[idx];
-      out += components.serializeTransactionOutput(output);
-    }
-    if (signed && tx.scripts && tx.scripts.length > 0) {
-      out += num2VarInt(tx.scripts.length)
-      for (var idx in tx.scripts) {
-        var script = tx.scripts[idx];
-        out += components.serializeWitness(script);
-      }
-    }
-    return out;
-  }
-  function _getPublicKey(privateKey, encode) {
-    if (encode === undefined) {
-      encode = true;
-    }
-    var ecparams = module.ecurve.getCurveByName('secp256r1');
-    var curvePt = ecparams.G.multiply(module.BigInteger.fromBuffer(hexstring2ab(privateKey)));
-    return curvePt.getEncoded(encode);
   }
   function _calculateInputs(balances, intents, gasCost) {
     if (gasCost === undefined) {
@@ -243,7 +366,7 @@ var walletCore = (function (components, exclusive, network) {
         change.push({
           assetId,
           value: (selectedAmt - requiredAmt) / 100000000,
-          scriptHash: _getScriptHashFromAddress(balances.address)
+          scriptHash: utils.getScriptHashFromAddress(balances.address)
         })
       }
       // Format inputs
@@ -254,27 +377,12 @@ var walletCore = (function (components, exclusive, network) {
     return { inputs: inputs, change: change };
   }
   function _signTransaction(transaction, privateKey) {
-    if (!_isPrivateKey(privateKey)) throw new Error('Key provided does not look like a private key!');
-    var invocationScript = '40' + _generateSignature(_serializeTransaction(transaction, false), privateKey);
-    var verificationScript = _getVerificationScriptFromPublicKey(_getPublicKey(privateKey));
+    if (!utils.isPrivateKey(privateKey)) throw new Error('Key provided does not look like a private key!');
+    var invocationScript = '40' + _generateSignature(components.serializeTransaction(transaction, false), privateKey);
+    var verificationScript = utils.getVerificationScriptFromPublicKey(utils.getPublicKeyFromPrivateKey(privateKey));
     var witness = { invocationScript: invocationScript, verificationScript: verificationScript };
     transaction.scripts ? transaction.scripts.push(witness) : transaction.scripts = [witness];
     return transaction;
-  }
-  function Balance(bal) {
-    this.address = bal.address;
-    this.net = bal.net;
-    this.assetSymbols = bal.assetSymbols ? bal.assetSymbols : [];
-    this.assets = {};
-    this.tokenSymbols = bal.tokenSymbols ? bal.tokenSymbols : [];
-    this.tokens = bal.tokens ? bal.tokens : {};
-    this.addAsset = function (sym, assetBalance = { balance: 0, spent: [], unspent: [], unconfirmed: [] }) {
-      sym = sym.toUpperCase();
-      this.assetSymbols.push(sym);
-      var newBalance = Object.assign({ balance: 0, spent: [], unspent: [], unconfirmed: [] }, assetBalance);
-      this.assets[sym] = JSON.parse(JSON.stringify(newBalance));
-      return this;
-    }
   }
   function Transaction(config, type, data) {
     var tx = Object.assign({
@@ -300,7 +408,7 @@ var walletCore = (function (components, exclusive, network) {
       return _signTransaction(this, privateKey);
     }
   }
-  function createContractTx(balances, intents, override = {}) {
+  Transaction.createContractTx = function(balances, intents, override = {}) {
     if (intents === null) throw new Error('Useless transaction!');
     var txConfig = Object.assign({
       type: 128,
@@ -309,71 +417,24 @@ var walletCore = (function (components, exclusive, network) {
     }, override);
     return new Transaction(txConfig).calculate(balances);
   }
-  function getAPIEndpoint(net) {
-    switch(net) {
-      case 'MainNet':
-        return 'http://api.wallet.cityofzion.io'
-      case 'TestNet':
-        return 'http://testnet-api.wallet.cityofzion.io'
-      default:
-        return net
-    }
-  }
-  function getBalance() {
-    var apiEndpoint = getAPIEndpoint(_netType);
-    return axios.get(apiEndpoint + '/v2/address/balance/' + _address).then(function(res) {
-      var bal = new Balance({ _netType, address: res.data.address });
-      Object.keys(res.data).map(function(key) {
-        if (key === 'net' || key === 'address') return;
-        var parsedAsset = {
-          balance: +(res.data[key].balance).toFixed(8),
-          unspent: res.data[key].unspent.map(function(coin) {
-            coin.value = +(coin.value).toFixed(8)
-            return coin
-          })
-        }
-        bal.addAsset(key, parsedAsset);
-      });
-      Object.assign(bal, res.data);
-      return bal;
-    });
-  }
-  function getClaims() {
-    var apiEndpoint = getAPIEndpoint(_netType);
-    return axios.get(apiEndpoint + '/v2/address/claims/' + _address).then(function(res) {
-      return res.data
-    });
-  }
-  function getRPCEndpoint() {
-    var apiEndpoint = getAPIEndpoint(_netType);
-    return axios.get(apiEndpoint + '/v2/network/best_node').then(function(response) {
-      return response.data.node
-    });
-  }
-  function getTransactionHistory() {
-    var apiEndpoint = getAPIEndpoint(_netType);
-    return axios.get(apiEndpoint + '/v2/address/history/' + _address).then(function(response) {
-      return response.data.history
-    });
-  }
-  function doSendAsset(to, from, assetsToSend) {
+  function _doSendAsset(to, from, assetsToSend) {
     var intents = Object.keys(assetsToSend).map(function (key) {
       return {
         assetId: _ASSET_ID[key],
         value: assetsToSend[key],
-        scriptHash: _getScriptHashFromAddress(to)
+        scriptHash: utils.getScriptHashFromAddress(to)
       }
     });
     var signedTx = null;
     var endPoint = null;
-    return Promise.all([getRPCEndpoint(), getBalance()]).then(function (values) {
+    return Promise.all([network.getRPCEndpoint(), network.getBalance(_address)]).then(function (values) {
       endPoint = values[0];
       var balance = values[1];
-      var unsignedTx = createContractTx(balance, intents);
+      var unsignedTx = Transaction.createContractTx(balance, intents);
       return unsignedTx.sign(_privateKey);
     }).then(function (signedResult) {
       signedTx = signedResult;
-      return network.sendRawTransaction(_serializeTransaction(signedTx)).execute(endPoint);
+      return network.sendRawTransaction(components.serializeTransaction(signedTx)).execute(endPoint);
     }).then(function (res) {
       if (res.result === true) {
         res.txid = signedTx.hash;
@@ -382,79 +443,29 @@ var walletCore = (function (components, exclusive, network) {
     });
   }
   // https://github.com/neotracker/neotracker-wallet/blob/6c612de7f38c80689260112cb271804f063a6b1c/src/wallet/shared/neon/index.js
-  function _toAddress(programHash) {
-    var data = new Uint8Array(1 + programHash.length);
-    data.set([23]);
-    data.set(programHash, 1);
-
-    var programHexString = module.CryptoJS.enc.Hex.parse(ab2hexstring(data));
-    var programSha256 = module.CryptoJS.SHA256(programHexString);
-    var programSha256_2 = module.CryptoJS.SHA256(programSha256);
-    var programSha256Buffer = hexstring2ab(programSha256_2.toString());
-
-    var datas = new Uint8Array(1 + programHash.length + 4);
-    datas.set(data);
-    datas.set(programSha256Buffer.slice(0, 4), 21);
-
-    return base58.encode(datas);
-  }
-  function getAddressFromPrivateKey() {
-    var accounts = [];
-    var publicKeyEncoded = _getPublicKey(_privateKey, true);
-    var publicKeyHash = hash160(publicKeyEncoded.toString('hex'));
-    var script = _getVerificationScriptFromPublicKey(publicKeyEncoded);
-    var programHash = hash160(script);
-    var address = _toAddress(hexstring2ab(programHash.toString()));
-    return address;
-  }
-  function _getPrivateKeyFromWIF(privateKeyWIF) {
-    var data = base58.decode(privateKeyWIF);
-    if (data.length != 38 || data[0] != 0x80 || data[33] != 0x01) {
-      // basic encoding errors
-      return -1;
-    }
-    var dataHexString = module.CryptoJS.enc.Hex.parse(ab2hexstring(data.slice(0, data.length - 4)));
-    var dataSha256 = module.CryptoJS.SHA256(dataHexString);
-    var dataSha256_2 = module.CryptoJS.SHA256(dataSha256);
-    var dataSha256Buffer = hexstring2ab(dataSha256_2.toString());
-    if (ab2hexstring(dataSha256Buffer.slice(0, 4)) != ab2hexstring(data.slice(data.length - 4, data.length))) {
-      //wif verify failed.
-      return -2;
-    }
-    return data.slice(1, 33).toString("hex");
-  }
   return {
-    getAPIEndpoint: getAPIEndpoint,
-    getBalance: getBalance,
-    getClaims: getClaims,
-    getRPCEndpoint: getRPCEndpoint,
-    getTransactionHistory: getTransactionHistory,
-    doSendAsset: doSendAsset,
-    setNetType: function (net) {
-      _netType = net;
-    },
-    getNetType: function () {
-      return _netType;
+    doSendAsset: function (to, assetsToSend) {
+      _doSendAsset(to, _address, assetsToSend);
     },
     getAddress: function () {
       return _address;
     },
     initWallet: function (privateKeyWIF) {
-      _privateKey = _getPrivateKeyFromWIF(privateKeyWIF);
-      _address = getAddressFromPrivateKey();
+      _privateKey = utils.getPrivateKeyFromWIF(privateKeyWIF);
+      _address = utils.getAddressFromPrivateKey(_privateKey);
       console.log("Wallet initialized - address: (" + _address + ")");
       var $wallet_summary_card = $('.wallet-summary-card');
       $wallet_summary_card.find('.-wallet-address').find('.-wallet-address-text').html(_address);
-      getBalance().then(function (balance) {
+      network.getBalance(_address).then(function (balance) {
         $wallet_summary_card.find('.-neo-balance').find('.-value').html(balance.assets['NEO']['balance']);
         $wallet_summary_card.find('.-gas-balance').find('.-value').html(balance.assets['GAS']['balance']);
       });
-      getClaims().then(function (claims) {
+      network.getClaims(_address).then(function (claims) {
         $wallet_summary_card.find('.-claim-gas').find('.-value').html(claims.total_claim);
       });
     }
   }
-})(components, exclusive, network);
+})(utils, components, exclusive, network);
 
 var UI_MODES = [
   'INTRO',
