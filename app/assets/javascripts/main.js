@@ -14,9 +14,24 @@ function Balance(bal) {
   }
 }
 
-var utils = (function () {
+var constants = (function () {
+  return {
+    ADDR_VERSION: '17'
+  }
+})();
+
+var utils = (function (constants) {
   var _BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
   var _base58 = module.baseX(_BASE58);
+  function _getScriptHashFromAddress(address) {
+    var hash = ab2hexstring(_base58.decode(address));
+    return reverseHex(hash.substr(2, 40));
+  }
+  function _getAddressFromScriptHash(scriptHash) {
+    var scriptHash = reverseHex(scriptHash);
+    var shaChecksum = hash256(constants.ADDR_VERSION + scriptHash).substr(0, 8);
+    return _base58.encode(module.Buffer.from(constants.ADDR_VERSION + scriptHash + shaChecksum, 'hex'));
+  }
   function _isPrivateKey(privateKey) {
     return /^[0-9A-Fa-f]{64}$/.test(privateKey);
   }
@@ -28,9 +43,20 @@ var utils = (function () {
       return shaChecksum === hexStr.substr(hexStr.length - 8, 8);
     } catch (e) { return false };
   }
-  function _getScriptHashFromAddress(address) {
-    var hash = ab2hexstring(_base58.decode(address));
-    return reverseHex(hash.substr(2, 40));
+  function _isAddress(address) {
+    try {
+      var programHash = ab2hexstring(_base58.decode(address));
+      var shaChecksum = hash256(programHash.slice(0, 42)).substr(0, 8);
+      // We use the checksum to verify the address
+      if (shaChecksum !== programHash.substr(42, 8)) return false;
+      // As other chains use similar checksum methods, we need to attempt to transform the programHash back into the address
+      var scriptHash = reverseHex(programHash.slice(2, 42));
+      if (_getAddressFromScriptHash(scriptHash) !== address) {
+        // address is not valid Neo address, could be btc, ltc etc.
+        return false;
+      }
+      return true;
+    } catch (e) { return false };
   }
   function _getPrivateKeyFromWIF(privateKeyWIF) {
     var data = _base58.decode(privateKeyWIF);
@@ -88,9 +114,10 @@ var utils = (function () {
     getPublicKeyFromPrivateKey: _getPublicKeyFromPrivateKey,
     isPrivateKey: _isPrivateKey,
     getScriptHashFromAddress: _getScriptHashFromAddress,
+    isAddress: _isAddress,
     base58: _base58
   }
-})();
+})(constants);
 
 var network = (function () {
   var _DEFAULT_REQ = { jsonrpc: '2.0', method: 'getblockcount', params: [], id: 1234 };
@@ -376,6 +403,9 @@ var walletCore = (function (utils, components, exclusive, network) {
     }).reduce(function(prev, curr) { prev.concat(curr), [] });
     return { inputs: inputs, change: change };
   }
+  function _getTransactionHash(transaction) {
+    return reverseHex(hash256(components.serializeTransaction(transaction, false)));
+  }
   function _signTransaction(transaction, privateKey) {
     if (!utils.isPrivateKey(privateKey)) throw new Error('Key provided does not look like a private key!');
     var invocationScript = '40' + _generateSignature(components.serializeTransaction(transaction, false), privateKey);
@@ -407,6 +437,9 @@ var walletCore = (function (utils, components, exclusive, network) {
     this.sign = function(privateKey) {
       return _signTransaction(this, privateKey);
     }
+    this.hash = function () {
+      return _getTransactionHash(this);
+    }
   }
   Transaction.createContractTx = function(balances, intents, override = {}) {
     if (intents === null) throw new Error('Useless transaction!');
@@ -417,7 +450,7 @@ var walletCore = (function (utils, components, exclusive, network) {
     }, override);
     return new Transaction(txConfig).calculate(balances);
   }
-  function _doSendAsset(to, from, assetsToSend) {
+  function _doSendAsset(to, from, assetsToSend, stateFunctions) {
     var intents = Object.keys(assetsToSend).map(function (key) {
       return {
         assetId: _ASSET_ID[key],
@@ -431,13 +464,22 @@ var walletCore = (function (utils, components, exclusive, network) {
       endPoint = values[0];
       var balance = values[1];
       var unsignedTx = Transaction.createContractTx(balance, intents);
+      if (stateFunctions !== undefined) {
+        stateFunctions.successfully_built();
+      }
       return unsignedTx.sign(_privateKey);
     }).then(function (signedResult) {
+      if (stateFunctions !== undefined) {
+        stateFunctions.successfully_signed();
+      }
       signedTx = signedResult;
       return network.sendRawTransaction(components.serializeTransaction(signedTx)).execute(endPoint);
     }).then(function (res) {
       if (res.result === true) {
-        res.txid = signedTx.hash;
+        res.txid = signedTx.hash();
+        if (stateFunctions !== undefined) {
+          stateFunctions.successfully_returned(res.txid);
+        }
       }
       return res;
     });
@@ -471,8 +513,8 @@ var walletCore = (function (utils, components, exclusive, network) {
   }
   // https://github.com/neotracker/neotracker-wallet/blob/6c612de7f38c80689260112cb271804f063a6b1c/src/wallet/shared/neon/index.js
   return {
-    doSendAsset: function (to, assetsToSend) {
-      _doSendAsset(to, _address, assetsToSend);
+    doSendAsset: function (to, assetsToSend, stateFunctions) {
+      return _doSendAsset(to, _address, assetsToSend, stateFunctions);
     },
     getAddress: function () {
       return _address;
@@ -480,7 +522,7 @@ var walletCore = (function (utils, components, exclusive, network) {
     initWallet: function (privateKeyWIF) {
       _privateKey = utils.getPrivateKeyFromWIF(privateKeyWIF);
       _address = utils.getAddressFromPrivateKey(_privateKey);
-      console.log("Wallet initialized - address: (" + _address + ")");
+      console.log("Wallet initialized - address: (" + _address + "), network: (" + network.getNetType() + ")");
       $('.wallet-summary-card').find('.-refresh-button').click(function () {
         $(this).attr('disabled', true);
         _refreshWallet();
@@ -490,6 +532,174 @@ var walletCore = (function (utils, components, exclusive, network) {
     refreshWallet: _refreshWallet
   }
 })(utils, components, exclusive, network);
+
+var errorModal = (function () {
+  var $_modal = null;
+  return {
+    setup: function () {
+      $_modal = $('#error-modal');
+    },
+    display: function (title, message) {
+      $_modal.find('.modal-header').find('.-text').html(title);
+      $_modal.find('.modal-body').find('p').html(message);
+      $_modal.modal('show');
+    }
+  }
+})();
+
+var transactionProcessModal = (function () {
+  var $_modal = null;
+  var $_progressParent = null;
+  var $_modalFooter = null;
+  function _addProgress(description) {
+    $_progressParent.append(
+      '<div><i class="fa fa-check-circle" aria-hidden="true"></i>' + description + '</div>'
+    );
+  }
+  return {
+    setup: function () {
+      $_modal = $('#transaction-process-modal');
+      $_modalFooter = $_modal.find('.modal-footer');
+      $_progressParent = $_modal.find('.-progress-parent');
+    },
+    addProgress: _addProgress,
+    complete: function (description) {
+      _addProgress(description);
+      $_modalFooter.show();
+    },
+    display: function () {
+      $_progressParent.html('');
+      $_modalFooter.hide();
+      $_modal.modal({
+        backdrop: 'static',
+        keyboard: false
+      });
+    },
+    close: function () {
+      $_modal.modal('hide');
+    }
+  }
+})();
+
+var transactionConfModal = (function (walletCore, errorModal, transactionProcessModal) {
+  var $_modal = null;
+  var $_confButton = null;
+  var _inputs = null;
+  return {
+    setup: function () {
+      $_modal = $('#transaction-conf-modal');
+      $_confButton = $_modal.find('.-confirm-button');
+      $_confButton.click(function () {
+        $_modal.modal('hide');
+        transactionProcessModal.display();
+        transactionProcessModal.addProgress('Started building transaction.');
+        var stateFunctions = {
+          successfully_built: function () {
+            transactionProcessModal.addProgress('Transaction successfully built.');
+          },
+          successfully_signed: function () {
+            transactionProcessModal.addProgress('Transaction successfully signed. Broadcasting transaction...');
+          },
+          successfully_returned: function (hash) {
+            transactionProcessModal.addProgress(
+              'Transaction added to mempool. Transaction hash:<div class=\'-transaction-hash\'><a href=\'https://neoexplorer.co/transactions/' + hash + '\'>' + hash + '</a></div>'
+            );
+            transactionProcessModal.complete('Transaction should be confirmed in a few minutes and visible in the blockchain.');
+          }
+        }
+        walletCore.doSendAsset(
+          _inputs.address,
+          { [_inputs.mode]: _inputs.number },
+          stateFunctions
+        ).catch(function (reason) {
+          transactionProcessModal.close();
+          console.log(reason);
+          errorModal.display('Send transaction failed', reason.message);
+        });
+        return false;
+      });
+    },
+    display: function (result) {
+      _inputs = result.inputs;
+      $_modal.find('.-number').html(result.inputs.number);
+      $_modal.find('.-asset').html(result.inputs.mode);
+      $_modal.find('.-address').html(result.inputs.address);
+      $_modal.modal('show');
+    }
+  }
+})(walletCore, errorModal, transactionProcessModal);
+
+var transferAssetForm = (function (utils, transactionConfModal, errorModal) {
+  var $_transferAssetForm = null;
+  var $_buttonLabel = null;
+  var _mode = 'NEO';
+  function refreshMenu() {
+    $_buttonLabel.html(_mode);
+  }
+  function _gatherInputs() {
+    return {
+      mode: _mode,
+      address: $_transferAssetForm.find('.-address-input').val(),
+      number: $_transferAssetForm.find('.-number-input').val()
+    }
+  }
+  function _validateInputs() {
+    var inputs = _gatherInputs();
+    if (!utils.isAddress(inputs.address)) {
+      return {
+        success: false,
+        reason: 'That doesn\'t appear to be a NEO address.'
+      }
+    }
+    var regexp = /^-?\d*\.{0,1}\d+$/;
+    if (!regexp.test(inputs.number)) {
+      return {
+        success: false,
+        reason: 'Send amount needs to be a number.'
+      }
+    }
+    inputs.number = parseFloat(inputs.number);
+    if (inputs.number < 0) {
+      return {
+        success: false,
+        reason: 'Send amount needs to be positive.'
+      }
+    }
+    if (inputs.mode === 'NEO') {
+      inputs.number = parseInt(inputs.number);
+    }
+    return {
+      success: true,
+      inputs: inputs
+    }
+  }
+  return {
+    setup: function () {
+      $_transferAssetForm = $('.-transfer-asset-form');
+      $_buttonLabel = $_transferAssetForm.find('.-amount-input-parent').find('.dropdown-toggle');
+      refreshMenu();
+      $_transferAssetForm.find('.-amount-input-parent').find('.dropdown-item').click(function () {
+        var mode = $(this).data('mode');
+        _mode = mode;
+        $_buttonLabel.dropdown('toggle');
+        refreshMenu();
+        return false;
+      });
+      $_transferAssetForm.submit(function () {
+        var result = _validateInputs();
+        if (!result.success) {
+          errorModal.display('Submit transaction error', result.reason);
+        } else {
+          transactionConfModal.display(result);
+        }
+        return false;
+      });
+    },
+    getMode: function () {
+      return _mode;
+    }
+  }
+})(utils, transactionConfModal, errorModal);
 
 var UI_MODES = [
   'INTRO',
@@ -543,6 +753,10 @@ $(function () {
       }
     })(ui_mode));
   }
+  transactionProcessModal.setup();
+  transactionConfModal.setup();
+  errorModal.setup();
+  // setup private key form
   $('input[type=radio][name=open_wallet_radio]').change(function() {
     refresh_open_wallet_menu(this.value);
   });
@@ -555,4 +769,6 @@ $(function () {
     switch_ui_mode(UI_MODES[3]);
     return false;
   });
+  // setup transfer asset form
+  transferAssetForm.setup();
 });

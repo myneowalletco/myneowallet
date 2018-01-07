@@ -39,6 +39,38 @@ header {
   }
 }
 
+form {
+  .input-group-text {
+    padding: .375rem .75rem;
+    margin-bottom: 0;
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+    color: #495057;
+    text-align: center;
+    white-space: nowrap;
+    background-color: #e9ecef;
+    border: 1px solid #ced4da;
+    border-radius: .25rem;
+  }
+  .input-group-prepend {
+    display: flex;
+    align-items: center;
+    font-size: 0;
+    .input-group-text {
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+    >.btn {
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+      color: #495057;
+      background-color: #e9ecef;
+      border: 1px solid #ced4da;
+    }
+  }
+}
+
 .card {
   background-color: white;
   box-shadow: 0px 1px 5px 0px rgba(0, 0, 0, 0.2), 0px 2px 2px 0px rgba(0, 0, 0, 0.14), 0px 3px 1px -2px rgba(0, 0, 0, 0.12);
@@ -176,14 +208,81 @@ header {
       }
       .-claim-gas {
         font-size: 18px;
+        line-height: 31px;
+        height: 31px;
         .-text {
-          line-height: 38px;
+          vertical-align: top;
           display: inline-block;
         }
         .btn {
+          vertical-align: top;
           margin-left: 12px;
         }
       }
+    }
+    .-transfer-asset-form {
+      .-address-input-parent {
+        margin-bottom: 12px;
+        .input-group-text {
+          font-size: 20px;
+        }
+        .-address-input {
+          font-size: 20px;
+        }
+      }
+      .-amount-input-parent {
+        margin-bottom: 12px;
+      }
+      .-send-button-parent {
+        text-align: right;
+        display: block;
+        .btn {
+          font-size: 20px;
+          padding: 0.3rem 1.2rem;
+        }
+      }
+    }
+  }
+}
+
+#transaction-process-modal {
+  .progress {
+    margin-bottom: 12px;
+  }
+  .-progress-parent {
+    word-wrap: break-word;
+    .fa-check-circle {
+      margin-right: 3px;
+      color: #4CAF50;
+    }
+    .-transaction-hash {
+      font-family: Courier, monospace;
+      background-color: #E2E2E2;
+      width: 100%;
+      padding: 5px;
+      margin: 8px 0;
+    }
+  }
+}
+
+#transaction-conf-modal {
+  .modal-body {
+    p {
+      font-size: 18px;
+      word-wrap: break-word;
+      .-number, .-asset, .-address {
+        font-weight: bold;
+        font-size: 22px;
+      }
+    }
+  }
+}
+
+#error-modal {
+  .modal-title {
+    .fa-exclamation-circle {
+      margin-right: 6px;
+      color: red;
     }
   }
 }
