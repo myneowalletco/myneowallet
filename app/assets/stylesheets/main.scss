@@ -132,7 +132,7 @@ form {
       font-size: 0;
       margin-bottom: 12px;
       button {
-        margin-right: 5px;
+        margin-right: 12px;
       }
     }
   }
@@ -252,8 +252,12 @@ form {
   .-progress-parent {
     word-wrap: break-word;
     .fa-check-circle {
-      margin-right: 3px;
+      margin-right: 5px;
       color: #4CAF50;
+    }
+    .fa-exclamation-circle {
+      margin-right: 5px;
+      color: #DC143C;
     }
     .-transaction-hash {
       font-family: Courier, monospace;

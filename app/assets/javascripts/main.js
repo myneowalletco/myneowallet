@@ -115,7 +115,12 @@ var utils = (function (constants) {
     isPrivateKey: _isPrivateKey,
     getScriptHashFromAddress: _getScriptHashFromAddress,
     isAddress: _isAddress,
-    base58: _base58
+    base58: _base58,
+    sleep: function (time) {
+      return new Promise(function(resolve) {
+        setTimeout(resolve, time);
+      });
+    }
   }
 })(constants);
 
@@ -169,6 +174,12 @@ var network = (function () {
       return response.data.history
     });
   }
+  function _getTransaction(transactionId) {
+    var apiEndpoint = _getAPIEndpoint(_netType);
+    return axios.get(apiEndpoint + '/v2/transaction/' + transactionId).then(function(response) {
+      return response.data;
+    });
+  }
   function _queryRPC(url, req) {
     var jsonRequest = axios.create({ headers: { 'Content-Type': 'application/json' } })
     var jsonRpcData = Object.assign({}, _DEFAULT_REQ, req);
@@ -207,6 +218,7 @@ var network = (function () {
     getClaims: _getClaims,
     getRPCEndpoint: _getRPCEndpoint,
     getTransactionHistory: _getTransactionHistory,
+    getTransaction: _getTransaction,
     Query: _Query,
     queryRPC: _queryRPC,
     sendRawTransaction: _sendRawTransaction,
@@ -290,6 +302,18 @@ var components = (function () {
 })();
 
 var exclusive = (function (components) {
+  var _getClaimExclusive = function (tx) {
+    return Object.assign({ claims: [] }, { claims: tx.claims });
+  }
+  var _getContractExclusive = function (tx) {
+    return {};
+  }
+  var _getInvocationExclusive = function (tx) {
+    return {
+      script: tx.script || '',
+      gas: tx.gas || 0
+    }
+  }
   var _serializeClaimExclusive = function(tx) {
     if (tx.type !== 0x02) throw new Error()
     var out = num2VarInt(tx.claims.length);
@@ -312,12 +336,17 @@ var exclusive = (function (components) {
     }
     return out;
   }
-  var _serializeExclusive = {}
+  var _serializeExclusive = {};
   _serializeExclusive[2] = _serializeClaimExclusive;
   _serializeExclusive[128] = _serializeContractExclusive;
   _serializeExclusive[209] = _serializeInvocationExclusive;
+  var _exclusive = {};
+  _exclusive[2] = _getClaimExclusive;
+  _exclusive[128] = _getContractExclusive;
+  _exclusive[209] = _getInvocationExclusive;
   return {
-    serializeExclusive: _serializeExclusive
+    serializeExclusive: _serializeExclusive,
+    exclusive: _exclusive
   }
 })(components);
 
@@ -423,12 +452,18 @@ var walletCore = (function (utils, components, exclusive, network) {
       inputs: [],
       outputs: [],
       scripts: []
-    }, config)
+    }, config);
     this.type = tx.type;
     this.version = tx.version;
     this.attributes = tx.attributes;
     this.inputs = tx.inputs;
     this.outputs = tx.outputs;
+    this.scripts = tx.scripts;
+    var exclusiveFields = exclusive.exclusive[this.type](tx);
+    var transaction = this;
+    Object.keys(exclusiveFields).map(function(k) {
+      transaction[k] = exclusiveFields[k];
+    });
     this.calculate = function (balances) {
       var result = _calculateInputs(balances, this.outputs, this.gas);
       this.inputs = result.inputs;
@@ -442,7 +477,10 @@ var walletCore = (function (utils, components, exclusive, network) {
       return _getTransactionHash(this);
     }
   }
-  Transaction.createContractTx = function(balances, intents, override = {}) {
+  Transaction.createContractTx = function(balances, intents, override) {
+    if (override === undefined) {
+      override = {};
+    }
     if (intents === null) throw new Error('Useless transaction!');
     var txConfig = Object.assign({
       type: 128,
@@ -450,6 +488,30 @@ var walletCore = (function (utils, components, exclusive, network) {
       outputs: intents
     }, override);
     return new Transaction(txConfig).calculate(balances);
+  }
+  Transaction.createClaimTx = function(address, claimsData, override) {
+    if (override === undefined) {
+      override = {};
+    }
+    var txConfig = Object.assign({
+      type: 2,
+      version: _TX_VERSION.CLAIM
+    }, override);
+    var totalClaim = 0;
+    var maxClaim = 255;
+    txConfig.claims = claimsData.claims.slice(0, maxClaim).map(function(c) {
+      totalClaim += c.claim;
+      return {
+        prevHash: c.txid,
+        prevIndex: c.index
+      }
+    });
+    txConfig.outputs = [{
+      assetId: _ASSET_ID.GAS,
+      value: totalClaim / 100000000,
+      scriptHash: utils.getScriptHashFromAddress(address)
+    }];
+    return new Transaction(Object.assign(txConfig, override));
   }
   function _doSendAsset(to, from, assetsToSend, stateFunctions) {
     var intents = Object.keys(assetsToSend).map(function (key) {
@@ -481,11 +543,62 @@ var walletCore = (function (utils, components, exclusive, network) {
         if (stateFunctions !== undefined) {
           stateFunctions.successfully_returned(res.txid);
         }
+      } else {
+        stateFunctions.error_validator_rejected();
+      }
+      return res;
+    });
+  }
+  function _doClaimAllGas(address, stateFunctions) {
+    var signedTx = null;
+    var endPoint = null;
+    return Promise.all([network.getRPCEndpoint(), network.getClaims(address)]).then(function (values) {
+      endPoint = values[0];
+      var claimsData = values[1];
+      if (claimsData.claims.length === 0) {
+        throw new Error('No claimable gas!');
+      }
+      var unsignedTx = Transaction.createClaimTx(address, claimsData);
+      if (stateFunctions !== undefined) {
+        stateFunctions.successfully_built();
+      }
+      return unsignedTx.sign(_privateKey);
+    }).then(function (signedResult) {
+      if (stateFunctions !== undefined) {
+        stateFunctions.successfully_signed();
+      }
+      signedTx = signedResult;
+      return network.sendRawTransaction(components.serializeTransaction(signedTx)).execute(endPoint);
+    }).then(function (res) {
+      if (res.result === true) {
+        res.txid = signedTx.hash();
+        if (stateFunctions !== undefined) {
+          stateFunctions.successfully_returned(res.txid);
+        }
+      } else {
+        stateFunctions.error_validator_rejected();
       }
       return res;
     });
   }
   var _refreshDisabledCounter = 2;
+  function _waitForTransactionToConfirmRecursive(transactionId, confirmed, failed, iteration) {
+    if (iteration == 24) {
+      failed();
+      return;
+    }
+    utils.sleep(5000).then(function () {
+      network.getTransaction(transactionId).then(function () {
+        confirmed();
+      }).catch(function () {
+        iteration += 1;
+        _waitForTransactionToConfirmRecursive(transactionId, confirmed, failed, iteration);
+      });
+    });
+  }
+  function _waitForTransactionToConfirm(transactionId, confirmed, failed) {
+    _waitForTransactionToConfirmRecursive(transactionId, confirmed, failed, 0)
+  }
   function _refreshWallet() {
     if (_refreshDisabledCounter < 2) {
       return;
@@ -515,7 +628,7 @@ var walletCore = (function (utils, components, exclusive, network) {
       if (_refreshDisabledCounter == 2) {
         $wallet_summary_card.find('.-refresh-button').removeAttr("disabled");
       }
-      $wallet_summary_card.find('.-claim-gas').find('.-value').html(claims.total_claim);
+      $wallet_summary_card.find('.-claim-gas').find('.-value').html(claims.total_claim + claims.total_unspent_claim);
     });
     network.getTransactionHistory(_address).then(function (history) {
       $transaction_history_parent.find('.-spinner-parent').hide();
@@ -549,6 +662,9 @@ var walletCore = (function (utils, components, exclusive, network) {
     doSendAsset: function (to, assetsToSend, stateFunctions) {
       return _doSendAsset(to, _address, assetsToSend, stateFunctions);
     },
+    doClaimAllGas: function(stateFunctions) {
+      return _doClaimAllGas(_address, stateFunctions);
+    },
     getAddress: function () {
       return _address;
     },
@@ -559,6 +675,59 @@ var walletCore = (function (utils, components, exclusive, network) {
       $('.wallet-summary-card').find('.-refresh-button').click(function () {
         $(this).attr('disabled', true);
         _refreshWallet();
+      });
+      $('.wallet-summary-card').find('.-claim-gas').click(function () {
+        transactionProcessModal.display();
+        transactionProcessModal.addProgress('Started claiming gas.');
+        transactionProcessModal.addProgress('Sending NEO to self.');
+        var neoToSelfTransactionHash = null;
+        var stateFunctions = {
+          successfully_built: function () {
+            transactionProcessModal.addProgress('Transaction successfully built.');
+          },
+          successfully_signed: function () {
+            transactionProcessModal.addProgress('Transaction successfully signed. Broadcasting transaction...');
+          },
+          successfully_returned: function (hash) {
+            neoToSelfTransactionHash = hash;
+            transactionProcessModal.addProgress(
+              'Transaction added to mempool. Transaction hash:<div class=\'-transaction-hash\'><a target=\'_blank\' href=\'https://neoexplorer.co/transactions/' + hash + '\'>' + hash + '</a></div>'
+            );
+          },
+          error_validator_rejected: function () {
+            transactionProcessModal.error('Transaction was rejected. Refresh the page and try again.');
+          }
+        };
+        walletCore.doSendAsset(
+          _address,
+          { ['GAS']: 0.1 },
+          stateFunctions
+        ).then(function () {
+          transactionProcessModal.addProgress('Waiting for transaction to confirm...');
+          _waitForTransactionToConfirm(
+            neoToSelfTransactionHash,
+            function () {
+              transactionProcessModal.addProgress('Transaction confirmed.');
+              stateFunctions.successfully_returned = function (hash) {
+                transactionProcessModal.addProgress(
+                  'Transaction added to mempool. Transaction hash:<div class=\'-transaction-hash\'><a target=\'_blank\' href=\'https://neoexplorer.co/transactions/' + hash + '\'>' + hash + '</a></div>'
+                );
+                transactionProcessModal.complete('Gas will be claimed after the transaction is confirmed.');
+              }
+              transactionProcessModal.addProgress('Sending Claim Gas transaction.');
+              walletCore.doClaimAllGas(stateFunctions).catch(function (reason) {
+                transactionProcessModal.error(reason.message);
+                console.log(reason);
+              });
+            },
+            function () {
+              transactionProcessModal.error('Transaction failed to confirm.');
+            }
+          );
+        }).catch(function (reason) {
+          transactionProcessModal.error(reason.message);
+          console.log(reason);
+        });
       });
       _refreshWallet();
     },
@@ -584,10 +753,19 @@ var transactionProcessModal = (function () {
   var $_modal = null;
   var $_progressParent = null;
   var $_modalFooter = null;
-  function _addProgress(description) {
-    $_progressParent.append(
-      '<div><i class="fa fa-check-circle" aria-hidden="true"></i>' + description + '</div>'
-    );
+  function _addProgress(description, error) {
+    if (error === undefined) {
+      error = false;
+    }
+    if (error) {
+      $_progressParent.append(
+        '<div><i class="fa fa-exclamation-circle" aria-hidden="true"></i>' + description + '</div>'
+      );
+    } else {
+      $_progressParent.append(
+        '<div><i class="fa fa-check-circle" aria-hidden="true"></i>' + description + '</div>'
+      );
+    }
   }
   return {
     setup: function () {
@@ -598,6 +776,10 @@ var transactionProcessModal = (function () {
     addProgress: _addProgress,
     complete: function (description) {
       _addProgress(description);
+      $_modalFooter.show();
+    },
+    error: function (description) {
+      _addProgress(description, true);
       $_modalFooter.show();
     },
     display: function () {
@@ -638,16 +820,18 @@ var transactionConfModal = (function (walletCore, errorModal, transactionProcess
               'Transaction added to mempool. Transaction hash:<div class=\'-transaction-hash\'><a href=\'https://neoexplorer.co/transactions/' + hash + '\'>' + hash + '</a></div>'
             );
             transactionProcessModal.complete('Transaction should be confirmed in a few minutes and visible in the blockchain.');
+          },
+          error_validator_rejected: function () {
+            transactionProcessModal.error('Transaction was rejected. Refresh the page and try again.');
           }
-        }
+        };
         walletCore.doSendAsset(
           _inputs.address,
           { [_inputs.mode]: _inputs.number },
           stateFunctions
         ).catch(function (reason) {
-          transactionProcessModal.close();
+          transactionProcessModal.error(reason.message);
           console.log(reason);
-          errorModal.display('Send transaction failed', reason.message);
         });
         return false;
       });
@@ -692,7 +876,7 @@ var transferAssetForm = (function (utils, transactionConfModal, errorModal) {
       }
     }
     inputs.number = parseFloat(inputs.number);
-    if (inputs.number < 0) {
+    if (inputs.number <= 0) {
       return {
         success: false,
         reason: 'Send amount needs to be positive.'
