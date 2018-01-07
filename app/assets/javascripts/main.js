@@ -325,6 +325,7 @@ var walletCore = (function (utils, components, exclusive, network) {
   var _netType = 'MainNet';
   var _address = null;
   var _privateKey = null;
+  var _transactionHistory = null;
   var _ASSETS = {
     NEO: 'NEO',
     'c56f33fc6ecfcd0c225c4ab356fee59390af8560be0e930faebe74a6daff7c9b': 'NEO',
@@ -491,6 +492,12 @@ var walletCore = (function (utils, components, exclusive, network) {
     }
     _refreshDisabledCounter = 0;
     var $wallet_summary_card = $('.wallet-summary-card');
+    var $transaction_history_parent = $wallet_summary_card.find('.-transaction-history-parent');
+    var $transaction_list_parent = $transaction_history_parent.find('.-transactions-list-parent');
+    var $transaction_list = $transaction_list_parent.find('tbody');
+    $transaction_history_parent.find('.-spinner-parent').show();
+    $transaction_list_parent.hide();
+    $transaction_list.html('');
     $wallet_summary_card.find('.-wallet-address').find('.-wallet-address-text').html(_address);
     $wallet_summary_card.find('.-neo-balance').find('.-value').html('...');
     $wallet_summary_card.find('.-gas-balance').find('.-value').html('...');
@@ -509,6 +516,32 @@ var walletCore = (function (utils, components, exclusive, network) {
         $wallet_summary_card.find('.-refresh-button').removeAttr("disabled");
       }
       $wallet_summary_card.find('.-claim-gas').find('.-value').html(claims.total_claim);
+    });
+    network.getTransactionHistory(_address).then(function (history) {
+      $transaction_history_parent.find('.-spinner-parent').hide();
+      $transaction_list_parent.show();
+      _transactionHistory = history;
+      var counter = 0;
+      for (var idx in _transactionHistory) {
+        counter++;
+        var transaction = _transactionHistory[idx];
+        var deltaAssets = '';
+        if (transaction.gas_sent) {
+          if (transaction.GAS > 0) deltaAssets += '+';
+          deltaAssets += (transaction.GAS.toFixed(3) + ' GAS');
+        } else {
+          if (transaction.NEO > 0) deltaAssets += '+';
+          deltaAssets += (transaction.NEO.toFixed(3) + ' NEO');
+        }
+        $transaction_list.append(`
+          <tr>
+            <td class='-transaction-block'>` + transaction.block_index + `</td>
+            <td class='-transaction-id'><a target='_blank' href=https://neoexplorer.co/transactions/` + transaction.txid + `>` + transaction.txid + `</a></td>
+            <td class='-transaction-assets'>` + deltaAssets + `</td>
+          </tr>
+        `);
+        $transaction_list_parent.find('.-view-all-parent').find('a').attr('href', 'https://neoexplorer.co/addresses/' + _address);
+      }
     });
   }
   // https://github.com/neotracker/neotracker-wallet/blob/6c612de7f38c80689260112cb271804f063a6b1c/src/wallet/shared/neon/index.js

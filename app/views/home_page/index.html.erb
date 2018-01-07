@@ -130,11 +130,30 @@
           </form>
         </div>
       </div>
-      <div class="card">
+      <div class="card -transaction-history-parent">
         <div class="-header">
           Transactions
         </div>
         <div class="-body">
+          <div class="-spinner-parent">
+            <img src="<%= asset_path 'spinner.gif' %>"/>
+          </div>
+          <div class="-transactions-list-parent">
+            <table>
+              <thead>
+                <tr>
+                  <th class='-transaction-block'>Block</th>
+                  <th class='-transaction-id'>TXID</th>
+                  <th class='-transaction-assets'>Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+              </tbody>
+            </table>
+            <div class="-view-all-parent">
+              <a target='_blank' href="https://www.google.com" class="btn btn-outline-secondary btn-sm">VIEW ALL TRANSACTIONS</a>
+            </div>
+          </div>
         </div>
       </div>
       <div class="card">

@@ -286,3 +286,36 @@ form {
     }
   }
 }
+
+.-transaction-history-parent {
+  .-spinner-parent {
+    text-align: center;
+    img {
+      width: 30px;
+    }
+  }
+  table {
+    table-layout:fixed;
+    max-width: 100%;
+    margin-bottom: 12px;
+    td {
+      text-overflow: ellipsis;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .-transaction-block {
+      width: 15%;
+    }
+    .-transaction-id {
+      width: 58%;
+    }
+    .-transaction-assets {
+      width: 27%;
+      min-width: 200px;
+      text-align: right;
+    }
+  }
+  .-view-all-parent {
+    text-align: center;
+  }
+}
