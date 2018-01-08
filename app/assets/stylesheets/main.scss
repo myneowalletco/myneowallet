@@ -158,6 +158,24 @@ form {
         font-weight: 300;
         font-size: 18px;
       }
+      .-github-notice {
+        margin-top: 18px;
+        font-weight: 300;
+        font-size: 18px;
+        .fa-github {
+          font-size: 28px;
+          margin-right: 3px;
+        }
+      }
+    }
+    .-bookmark-notice {
+      font-weight: 300;
+      font-size: 18px;
+      text-align: center;
+      .fa-exclamation-triangle {
+        font-size: 28px;
+        margin-right: 3px;
+      }
     }
   }
   .open-wallet-card {
