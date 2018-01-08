@@ -1129,6 +1129,14 @@ var transferAssetForm = (function (utils, transactionConfModal, errorModal) {
   }
 })(utils, transactionConfModal, errorModal);
 
+function clearAuthForms() {
+  $('.encrypted-private-key-form').find('.-encrypted-private-key-value').val('');
+  $('.encrypted-private-key-form').find('.-password-value').val('');
+  $('.private-key-form').find('.-private-key-value').val('');
+  $('.new-wallet-form').find('.-password-value').val('');
+  $('.new-wallet-form').find('.-password-confirmation-value').val('');
+}
+
 var UI_MODES = [
   'INTRO',
   'NEW_WALLET',
@@ -1137,6 +1145,7 @@ var UI_MODES = [
 var UI_MODE_DATA = {};
 UI_MODE_DATA[UI_MODES[0]] = { class: 'intro-card', action: 'action-intro', callback: function () {
   walletCore.closeWallet();
+  clearAuthForms();
 } }
 UI_MODE_DATA[UI_MODES[1]] = { class: 'new-wallet-card', action: 'action-new-wallet' }
 UI_MODE_DATA[UI_MODES[2]] = { class: 'open-wallet-card', action: 'action-open-wallet' }
@@ -1208,8 +1217,7 @@ $(function () {
         $this.find('.-password-value').val()
       ).then(function () {
         processModal.close();
-        $this.find('.-encrypted-private-key-value').val('');
-        $this.find('.-password-value').val('');
+        clearAuthForms();
         switch_ui_mode(UI_MODES[3]);
       }).catch(function (reason) {
         processModal.close();
@@ -1221,7 +1229,7 @@ $(function () {
   $('.private-key-form').submit(function () {
     var $this = $(this);
     walletCore.initWallet($this.find('.-private-key-value').val());
-    $this.find('.-private-key-value').val('');
+    clearAuthForms();
     switch_ui_mode(UI_MODES[3]);
     return false;
   });
@@ -1240,8 +1248,7 @@ $(function () {
     utils.sleep(1000).then(function () {
       walletCore.createWallet(password).then(function (result) {
         processModal.close();
-        $this.find('.-password-value').val('');
-        $this.find('.-password-confirmation-value').val('');
+        clearAuthForms();
         defaultModal.display(
           'Welcome to NEO!',
           `
