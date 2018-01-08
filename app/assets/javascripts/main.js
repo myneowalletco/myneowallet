@@ -1,22 +1,12 @@
-function Balance(bal) {
-  this.address = bal.address;
-  this.net = bal.net;
-  this.assetSymbols = bal.assetSymbols ? bal.assetSymbols : [];
-  this.assets = {};
-  this.tokenSymbols = bal.tokenSymbols ? bal.tokenSymbols : [];
-  this.tokens = bal.tokens ? bal.tokens : {};
-  this.addAsset = function (sym, assetBalance = { balance: 0, spent: [], unspent: [], unconfirmed: [] }) {
-    sym = sym.toUpperCase();
-    this.assetSymbols.push(sym);
-    var newBalance = Object.assign({ balance: 0, spent: [], unspent: [], unconfirmed: [] }, assetBalance);
-    this.assets[sym] = JSON.parse(JSON.stringify(newBalance));
-    return this;
-  }
-}
-
 var constants = (function () {
   return {
-    ADDR_VERSION: '17'
+    ADDR_VERSION: '17',
+    ASSETS: {
+      NEO: 'NEO',
+      'c56f33fc6ecfcd0c225c4ab356fee59390af8560be0e930faebe74a6daff7c9b': 'NEO',
+      GAS: 'GAS',
+      '602c79718b16e442de58778e148d0b1084e3b2dffd5de6b7b16cee7969282de7': 'GAS'
+    }
   }
 })();
 
@@ -140,20 +130,7 @@ var network = (function () {
   function _getBalance(address) {
     var apiEndpoint = _getAPIEndpoint(_netType);
     return axios.get(apiEndpoint + '/v2/address/balance/' + address).then(function(res) {
-      var bal = new Balance({ _netType, address: res.data.address });
-      Object.keys(res.data).map(function(key) {
-        if (key === 'net' || key === 'address') return;
-        var parsedAsset = {
-          balance: +(res.data[key].balance).toFixed(8),
-          unspent: res.data[key].unspent.map(function(coin) {
-            coin.value = +(coin.value).toFixed(8)
-            return coin
-          })
-        }
-        bal.addAsset(key, parsedAsset);
-      });
-      Object.assign(bal, res.data);
-      return bal;
+      return res.data;
     });
   }
   function _getClaims(address) {
@@ -350,17 +327,54 @@ var exclusive = (function (components) {
   }
 })(components);
 
-var walletCore = (function (utils, components, exclusive, network) {
+var balanceManager = (function (constants) {
+  var _bal = null;
+  function Balance(bal) {
+    this.assetSymbols = bal.assetSymbols ? bal.assetSymbols : [];
+    this.assets = {};
+    this.tokenSymbols = bal.tokenSymbols ? bal.tokenSymbols : [];
+    this.tokens = bal.tokens ? bal.tokens : {};
+    this.addAsset = function (sym, assetBalance = { balance: 0, spent: [], unspent: [], unconfirmed: [] }) {
+      sym = sym.toUpperCase();
+      this.assetSymbols.push(sym);
+      var newBalance = Object.assign({ balance: 0, spent: [], unspent: [], unconfirmed: [] }, assetBalance);
+      this.assets[sym] = JSON.parse(JSON.stringify(newBalance));
+      return this;
+    }
+  }
+  function _reset() {
+    _bal = new Balance({});
+  }
+  _reset();
+  return {
+    getBalance: function () {
+      return _bal;
+    },
+    update: function (netBal) {
+      Object.keys(netBal).map(function(key) {
+        if (key === 'net' || key === 'address') return;
+        var parsedAsset = {
+          balance: +(netBal[key].balance).toFixed(8),
+          unspent: netBal[key].unspent.map(function(coin) {
+            coin.value = +(coin.value).toFixed(8)
+            return coin
+          })
+        }
+        _bal.addAsset(key, parsedAsset);
+      });
+      Object.assign(_bal, netBal);
+    },
+    reset: function () {
+      _reset();
+    }
+  }
+})(constants);
+
+var walletCore = (function (utils, components, exclusive, network, balanceManager) {
   var _netType = 'MainNet';
   var _address = null;
   var _privateKey = null;
   var _transactionHistory = null;
-  var _ASSETS = {
-    NEO: 'NEO',
-    'c56f33fc6ecfcd0c225c4ab356fee59390af8560be0e930faebe74a6daff7c9b': 'NEO',
-    GAS: 'GAS',
-    '602c79718b16e442de58778e148d0b1084e3b2dffd5de6b7b16cee7969282de7': 'GAS'
-  };
   var _ASSET_ID = {
     NEO: 'c56f33fc6ecfcd0c225c4ab356fee59390af8560be0e930faebe74a6daff7c9b',
     GAS: '602c79718b16e442de58778e148d0b1084e3b2dffd5de6b7b16cee7969282de7'
@@ -398,13 +412,13 @@ var walletCore = (function (utils, components, exclusive, network) {
     var change = [];
     var inputs = Object.keys(requiredAssets).map(function(assetId) {
       var requiredAmt = requiredAssets[assetId];
-      var assetSymbol = _ASSETS[assetId];
+      var assetSymbol = constants.ASSETS[assetId];
       if (balances.assetSymbols.indexOf(assetSymbol) === -1) {
         throw new Error('This balance does not contain any ' + assetSymbol + '!');
       }
       var assetBalance = balances.assets[assetSymbol];
       if (assetBalance.balance * 100000000 < requiredAmt) {
-        throw new Error('Insufficient ' + _ASSETS[assetId] + '! Need ' + (requiredAmt / 100000000) + ' but only found ' + assetBalance.balance);
+        throw new Error('Insufficient ' + constants.ASSETS[assetId] + '! Need ' + (requiredAmt / 100000000) + ' but only found ' + assetBalance.balance);
       }
       // Ascending order sort
       assetBalance.unspent.sort(function(a, b) { return a.value - b.value });
@@ -414,7 +428,7 @@ var walletCore = (function (utils, components, exclusive, network) {
       while (selectedAmt < requiredAmt) {
         selectedInputs += 1;
         if (selectedInputs > assetBalance.unspent.length) {
-          throw new Error('Insufficient ' + ASSETS[assetId] + '! Reached end of unspent coins!');
+          throw new Error('Insufficient ' + constants.ASSETS[assetId] + '! Reached end of unspent coins!');
         }
         selectedAmt += Math.round(assetBalance.unspent[selectedInputs - 1].value * 100000000);
       }
@@ -523,7 +537,13 @@ var walletCore = (function (utils, components, exclusive, network) {
     });
     var signedTx = null;
     var endPoint = null;
-    return Promise.all([network.getRPCEndpoint(), network.getBalance(_address)]).then(function (values) {
+    return Promise.all([
+      network.getRPCEndpoint(),
+      network.getBalance(_address).then(function (netBal) {
+        balanceManager.update(netBal);
+        return balanceManager.getBalance();
+      })
+    ]).then(function (values) {
       endPoint = values[0];
       var balance = values[1];
       var unsignedTx = Transaction.createContractTx(balance, intents);
@@ -615,14 +635,21 @@ var walletCore = (function (utils, components, exclusive, network) {
     $wallet_summary_card.find('.-neo-balance').find('.-value').html('...');
     $wallet_summary_card.find('.-gas-balance').find('.-value').html('...');
     $wallet_summary_card.find('.-claim-gas').find('.-value').html('...');
-    network.getBalance(_address).then(function (balance) {
-      _refreshDisabledCounter += 1;
-      if (_refreshDisabledCounter == 2) {
-        $wallet_summary_card.find('.-refresh-button').removeAttr("disabled");
+    network.getBalance(_address).then(
+      function (netBal) {
+        balanceManager.update(netBal);
+        return balanceManager.getBalance();
       }
-      $wallet_summary_card.find('.-neo-balance').find('.-value').html(balance.assets['NEO']['balance']);
-      $wallet_summary_card.find('.-gas-balance').find('.-value').html(balance.assets['GAS']['balance']);
-    });
+    ).then(
+      function (balance) {
+        _refreshDisabledCounter += 1;
+        if (_refreshDisabledCounter == 2) {
+          $wallet_summary_card.find('.-refresh-button').removeAttr("disabled");
+        }
+        $wallet_summary_card.find('.-neo-balance').find('.-value').html(balance.assets['NEO']['balance']);
+        $wallet_summary_card.find('.-gas-balance').find('.-value').html(balance.assets['GAS']['balance']);
+      }
+    );
     network.getClaims(_address).then(function (claims) {
       _refreshDisabledCounter += 1;
       if (_refreshDisabledCounter == 2) {
@@ -668,6 +695,12 @@ var walletCore = (function (utils, components, exclusive, network) {
     getAddress: function () {
       return _address;
     },
+    closeWallet: function () {
+      _netType = 'MainNet';
+      _address = null;
+      _privateKey = null;
+      _transactionHistory = null;
+    },
     initWallet: function (privateKeyWIF) {
       _privateKey = utils.getPrivateKeyFromWIF(privateKeyWIF);
       _address = utils.getAddressFromPrivateKey(_privateKey);
@@ -695,12 +728,14 @@ var walletCore = (function (utils, components, exclusive, network) {
             );
           },
           error_validator_rejected: function () {
-            transactionProcessModal.error('Transaction was rejected. Refresh the page and try again.');
+            transactionProcessModal.error(
+              'Transaction was rejected. Did you recently send a transaction? Wait for the transaction to be confirmed first. Refresh the page and try again.'
+            );
           }
         };
         walletCore.doSendAsset(
           _address,
-          { ['GAS']: 0.1 },
+          { ['NEO']: 1 },
           stateFunctions
         ).then(function () {
           transactionProcessModal.addProgress('Waiting for transaction to confirm...');
@@ -733,7 +768,7 @@ var walletCore = (function (utils, components, exclusive, network) {
     },
     refreshWallet: _refreshWallet
   }
-})(utils, components, exclusive, network);
+})(utils, components, exclusive, network, balanceManager);
 
 var errorModal = (function () {
   var $_modal = null;
@@ -822,7 +857,7 @@ var transactionConfModal = (function (walletCore, errorModal, transactionProcess
             transactionProcessModal.complete('Transaction should be confirmed in a few minutes and visible in the blockchain.');
           },
           error_validator_rejected: function () {
-            transactionProcessModal.error('Transaction was rejected. Refresh the page and try again.');
+            transactionProcessModal.error('Transaction was rejected. Did you recently send a transaction? Wait for the transaction to be confirmed first. Refresh the page and try again.');
           }
         };
         walletCore.doSendAsset(
@@ -876,14 +911,21 @@ var transferAssetForm = (function (utils, transactionConfModal, errorModal) {
       }
     }
     inputs.number = parseFloat(inputs.number);
-    if (inputs.number <= 0) {
-      return {
-        success: false,
-        reason: 'Send amount needs to be positive.'
-      }
-    }
     if (inputs.mode === 'NEO') {
       inputs.number = parseInt(inputs.number);
+      if (inputs.number <= 0) {
+        return {
+          success: false,
+          reason: 'Cannot send less than 1 NEO.'
+        }
+      }
+    } else {
+      if (inputs.number <= 0) {
+        return {
+          success: false,
+          reason: 'Send amount needs to be positive.'
+        }
+      }
     }
     return {
       success: true,
@@ -924,7 +966,9 @@ var UI_MODES = [
   'OPEN_WALLET'
 ];
 var UI_MODE_DATA = {};
-UI_MODE_DATA[UI_MODES[0]] = { class: 'intro-card', action: 'action-intro' }
+UI_MODE_DATA[UI_MODES[0]] = { class: 'intro-card', action: 'action-intro', callback: function () {
+  walletCore.closeWallet();
+} }
 UI_MODE_DATA[UI_MODES[1]] = { class: 'new-wallet-card', action: 'action-new-wallet' }
 UI_MODE_DATA[UI_MODES[2]] = { class: 'open-wallet-card', action: 'action-open-wallet' }
 UI_MODE_DATA[UI_MODES[3]] = { class: 'wallet-summary-card', action: 'action-wallet-summary' }
@@ -933,6 +977,9 @@ var ui_mode = UI_MODES[0];
 function refresh_ui() {
   $('.-wallet-core-child').hide();
   $('.' + UI_MODE_DATA[ui_mode]['class']).show();
+  if (UI_MODE_DATA[ui_mode].callback !== undefined) {
+    UI_MODE_DATA[ui_mode].callback();
+  }
 }
 
 function switch_ui_mode(new_ui_mode) {
