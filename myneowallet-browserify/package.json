@@ -10,6 +10,7 @@
     "base-x": "3.0.4",
     "secure-random": "1.1.1",
     "js-scrypt": "0.2.0",
-    "bs58check": "2.1.1"
+    "bs58check": "2.1.1",
+    "wif": "2.0.6"
   }
 }

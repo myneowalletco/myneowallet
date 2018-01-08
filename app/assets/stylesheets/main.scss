@@ -245,6 +245,12 @@ form {
   }
 }
 
+#process-modal {
+  .progress {
+    margin-bottom: 12px;
+  }
+}
+
 #transaction-process-modal {
   .progress {
     margin-bottom: 12px;
@@ -260,6 +266,19 @@ form {
       color: #DC143C;
     }
     .-transaction-hash {
+      font-family: Courier, monospace;
+      background-color: #E2E2E2;
+      width: 100%;
+      padding: 5px;
+      margin: 8px 0;
+    }
+  }
+}
+
+#default-modal {
+  .modal-body {
+    word-wrap: break-word;
+    .-wallet-field {
       font-family: Courier, monospace;
       background-color: #E2E2E2;
       width: 100%;

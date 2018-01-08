@@ -7,6 +7,7 @@ var baseX = require('base-x');
 var secureRandom = require('secure-random');
 var bs58check = require('bs58check');
 var scrypt = require('js-scrypt');
+var wif = require('wif');
 module.exports = {
   BigInteger,
   CryptoJS,
@@ -16,5 +17,7 @@ module.exports = {
   baseX,
   secureRandom,
   bs58check,
-  scrypt
+  scrypt,
+  wif,
+  secureRandom
 }

@@ -22,7 +22,7 @@ var utils = (function (constants) {
   var _BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
   var _base58 = module.baseX(_BASE58);
   function _generatePrivateKey() {
-    return ab2hexstring(secureRandom(32));
+    return ab2hexstring(module.secureRandom(32));
   }
   function _getScriptHashFromAddress(address) {
     var hash = ab2hexstring(_base58.decode(address));
@@ -91,6 +91,9 @@ var utils = (function (constants) {
     datas.set(programSha256Buffer.slice(0, 4), 21);
     return _base58.encode(datas);
   }
+  function _getWIFFromPrivateKey(privateKey) {
+    return module.wif.encode(128, module.Buffer.from(privateKey, 'hex'), true);
+  }
   function _getPublicKeyFromPrivateKey(privateKey, encode) {
     if (encode === undefined) {
       encode = true;
@@ -132,6 +135,7 @@ var utils = (function (constants) {
     getPublicKeyFromPrivateKey: _getPublicKeyFromPrivateKey,
     isPrivateKey: _isPrivateKey,
     getScriptHashFromAddress: _getScriptHashFromAddress,
+    getWIFFromPrivateKey: _getWIFFromPrivateKey,
     isAddress: _isAddress,
     base58: _base58,
     hexXor: _hexXor,
@@ -143,7 +147,7 @@ var utils = (function (constants) {
   }
 })(constants);
 
-var nep2 = (function () {
+var nep2 = (function (utils) {
   function _ensureScryptParams (params) {
     return Object.assign({}, constants.DEFAULT_SCRYPT, params);
   }
@@ -213,13 +217,13 @@ var nep2 = (function () {
     var address = utils.getAddressFromPrivateKey(privateKey);
     var newAddressHash = SHA256(SHA256(enc.Latin1.parse(address))).toString().slice(0, 8);
     if (addressHash !== newAddressHash) throw new Error('Wrong Password!');
-    return [privateKey, address];
+    return [utils.getWIFFromPrivateKey(privateKey), address];
   }
   return {
     encrypt: _encrypt,
     decrypt: _decrypt
   }
-})();
+})(utils);
 
 var network = (function () {
   var _DEFAULT_REQ = { jsonrpc: '2.0', method: 'getblockcount', params: [], id: 1234 };
@@ -856,6 +860,19 @@ var walletCore = (function (utils, components, exclusive, network, balanceManage
     });
     _refreshWallet();
   }
+  function _createWallet(password) {
+    return Promise.resolve().then(function () {
+      var privateKey = utils.generatePrivateKey();
+      var privateKeyWIF = utils.getWIFFromPrivateKey(privateKey);
+      var address = utils.getAddressFromPrivateKey(privateKey);
+      var encryptedPrivateKey = nep2.encrypt(privateKeyWIF, password);
+      return {
+        encryptedPrivateKey: encryptedPrivateKey,
+        address: address,
+        privateKeyWIF: privateKeyWIF
+      }
+    });
+  }
   return {
     doSendAsset: function (to, assetsToSend, stateFunctions) {
       return _doSendAsset(to, _address, assetsToSend, stateFunctions);
@@ -873,6 +890,13 @@ var walletCore = (function (utils, components, exclusive, network, balanceManage
       _transactionHistory = null;
     },
     initWallet: _initWallet,
+    initWalletEncrypted: function (encryptedPrivateKey, password) {
+      return Promise.resolve().then(function () {
+        var data = nep2.decrypt(encryptedPrivateKey, password);
+        _initWallet(data[0]);
+      });
+    },
+    createWallet: _createWallet,
     refreshWallet: _refreshWallet
   }
 })(utils, components, exclusive, network, balanceManager);
@@ -887,6 +911,44 @@ var errorModal = (function () {
       $_modal.find('.modal-header').find('.-text').html(title);
       $_modal.find('.modal-body').find('p').html(message);
       $_modal.modal('show');
+    }
+  }
+})();
+
+var defaultModal = (function () {
+  var $_modal = null;
+  return {
+    setup: function () {
+      $_modal = $('#default-modal');
+    },
+    display: function (title, message) {
+      $_modal.find('.modal-title').html(title);
+      $_modal.find('.modal-body').html(message);
+      $_modal.modal('show');
+    }
+  }
+})();
+
+var processModal = (function () {
+  var $_modal = null;
+  var $_title = null;
+  var $_progressParent = null;
+  return {
+    setup: function () {
+      $_modal = $('#process-modal');
+      $_title = $_modal.find('.modal-title');
+      $_progressParent = $_modal.find('.-progress-parent');
+    },
+    display: function (title, text) {
+      $_modal.modal({
+        backdrop: 'static',
+        keyboard: false
+      });
+      $_title.html(title);
+      $_progressParent.html(text);
+    },
+    close: function () {
+      $_modal.modal('hide');
     }
   }
 })();
@@ -1126,9 +1188,11 @@ $(function () {
       }
     })(ui_mode));
   }
+  processModal.setup();
   transactionProcessModal.setup();
   transactionConfModal.setup();
   errorModal.setup();
+  defaultModal.setup();
   // setup private key form
   $('input[type=radio][name=open_wallet_radio]').change(function() {
     refresh_open_wallet_menu(this.value);
@@ -1137,8 +1201,21 @@ $(function () {
   $('input[type=radio][name=open_wallet_radio][value=encrypted_private_key]').change();
   $('.encrypted-private-key-form').submit(function () {
     var $this = $(this);
-    alert($this.find('.-encrypted-private-key-value').val());
-    alert($this.find('.-password-value').val());
+    processModal.display('Logging in', 'Decrypting private key...');
+    utils.sleep(1000).then(function () {
+      walletCore.initWalletEncrypted(
+        $this.find('.-encrypted-private-key-value').val(),
+        $this.find('.-password-value').val()
+      ).then(function () {
+        processModal.close();
+        $this.find('.-encrypted-private-key-value').val('');
+        $this.find('.-password-value').val('');
+        switch_ui_mode(UI_MODES[3]);
+      }).catch(function (reason) {
+        processModal.close();
+        errorModal.display('Login failed', reason.message);
+      });      
+    });
     return false;
   });
   $('.private-key-form').submit(function () {
@@ -1146,6 +1223,40 @@ $(function () {
     walletCore.initWallet($this.find('.-private-key-value').val());
     $this.find('.-private-key-value').val('');
     switch_ui_mode(UI_MODES[3]);
+    return false;
+  });
+  $('.new-wallet-form').submit(function () {
+    var $this = $(this);
+    var password = $this.find('.-password-value').val();
+    var password_confirmation = $this.find('.-password-confirmation-value').val();
+    if (password !== password_confirmation) {
+      errorModal.display('Failed to create wallet', 'Passwords don\'t match!');
+      return false;
+    } else if (password.length < 8) {
+      errorModal.display('Failed to create wallet', 'Password needs to have at least 8 letters.');
+      return false;      
+    }
+    processModal.display('Creating wallet', 'Generating and encrypting private key...');
+    utils.sleep(1000).then(function () {
+      walletCore.createWallet(password).then(function (result) {
+        processModal.close();
+        $this.find('.-password-value').val('');
+        $this.find('.-password-confirmation-value').val('');
+        defaultModal.display(
+          'Welcome to NEO!',
+          `
+            <div>Private Key (WIF): <div class='-wallet-field'>` + result.privateKeyWIF + `</div></div>
+            <div>Private Key (Encryped): <div class='-wallet-field'>` + result.encryptedPrivateKey + `</div></div>
+            <div>Address: <div class='-wallet-field'>` + result.address + `</div></div>
+          `
+        )
+        walletCore.initWallet(result.privateKeyWIF);
+        switch_ui_mode(UI_MODES[3]);
+      }).catch(function (reason) {
+        processModal.close();
+        errorModal.display('Failed to create wallet', reason.message);
+      });      
+    });
     return false;
   });
   // setup transfer asset form

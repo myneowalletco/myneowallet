@@ -18,12 +18,24 @@
 
   <div class="row -wallet-core-child new-wallet-card">
     <div class="col">
-      <button class="btn btn-primary action-intro">BACK</button>
+      <div class="-buttons-parent">
+        <button class="btn btn-primary action-intro">BACK</button>
+      </div>
       <div class="card">
         <div class="-header">
           Create New Wallet
         </div>
         <div class="-body">
+          <form class="new-wallet-form">
+            <div class="form-group">
+              <input name="password" type="password" class="form-control -password-value" placeholder="Password">
+              <small class="form-text text-muted">Password needs to have at least 8 letters.</small>
+            </div>
+            <div class="form-group">
+              <input name="password_confirmation" type="password" class="form-control -password-confirmation-value" placeholder="Password confirmation">
+            </div>
+            <button type="submit" class="btn btn-primary">Create</button>
+          </form>
         </div>
       </div>
     </div>
@@ -64,11 +76,11 @@
               </form>
               <form class="encrypted-private-key-form open-wallet-menu">
                 <div class="form-group">
-                  <input name="password" class="form-control -password-value" placeholder="Enter your password">
-                </div>
-                <div class="form-group">
                   <input name="encrypted-private-key" class="form-control -encrypted-private-key-value" placeholder="Enter your encrypted private key">
                   <small class="form-text text-muted">MyNEOWallet will not share your private key with anyone else.</small>
+                </div>
+                <div class="form-group">
+                  <input name="password" type="password" class="form-control -password-value" placeholder="Enter your password">
                 </div>
                 <button type="submit" class="btn btn-primary">Submit</button>
               </form>
@@ -170,6 +182,23 @@
   </div>
 </div>
 
+<div id="process-modal" class="modal" tabindex="-1" role="dialog">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"></h5>
+      </div>
+      <div class="modal-body">
+        <div class="progress">
+          <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" style="width: 100%"></div>
+        </div>
+        <div class="-progress-parent">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="transaction-process-modal" class="modal" tabindex="-1" role="dialog">
   <div class="modal-dialog" role="document">
     <div class="modal-content">
@@ -225,6 +254,24 @@
       </div>
       <div class="modal-body">
         <p></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="default-modal" class="modal" tabindex="-1" role="dialog">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"></h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
