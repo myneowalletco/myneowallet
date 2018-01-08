@@ -4,11 +4,17 @@ var CryptoJS = require('crypto-js');
 var ecurve = require('ecurve');
 var Buffer = require('buffer').Buffer;
 var baseX = require('base-x');
+var secureRandom = require('secure-random');
+var bs58check = require('bs58check');
+var scrypt = require('js-scrypt');
 module.exports = {
   BigInteger,
   CryptoJS,
   ec,
   ecurve,
   Buffer,
-  baseX
+  baseX,
+  secureRandom,
+  bs58check,
+  scrypt
 }

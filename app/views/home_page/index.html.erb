@@ -44,12 +44,12 @@
               <div>
                 <form class="open-wallet-options-form">
                   <div class="-option-parent">
-                    <input id="open_wallet_radio_1" name="open_wallet_radio" type="radio" value="private_key">
-                    <label for="open_wallet_radio_1">Private Key (WIF)</label>
+                    <input id="open_wallet_radio_1" name="open_wallet_radio" type="radio" value="encrypted_private_key">
+                    <label for="open_wallet_radio_1">Encrypted Private Key</label>
                   </div>
                   <div class="-option-parent">
-                    <input id="open_wallet_radio_2" name="open_wallet_radio" type="radio" value="keystore_file">
-                    <label for="open_wallet_radio_2">Keystore File (UTC / JSON)</label>
+                    <input id="open_wallet_radio_2" name="open_wallet_radio" type="radio" value="private_key">
+                    <label for="open_wallet_radio_2">Private Key (WIF)</label>
                   </div>
                 </form>
               </div>
@@ -58,6 +58,16 @@
               <form class="private-key-form open-wallet-menu">
                 <div class="form-group">
                   <input name="private-key-wif" class="form-control -private-key-value" placeholder="Enter your WIF private key">
+                  <small class="form-text text-muted">MyNEOWallet will not share your private key with anyone else.</small>
+                </div>
+                <button type="submit" class="btn btn-primary">Submit</button>
+              </form>
+              <form class="encrypted-private-key-form open-wallet-menu">
+                <div class="form-group">
+                  <input name="password" class="form-control -password-value" placeholder="Enter your password">
+                </div>
+                <div class="form-group">
+                  <input name="encrypted-private-key" class="form-control -encrypted-private-key-value" placeholder="Enter your encrypted private key">
                   <small class="form-text text-muted">MyNEOWallet will not share your private key with anyone else.</small>
                 </div>
                 <button type="submit" class="btn btn-primary">Submit</button>

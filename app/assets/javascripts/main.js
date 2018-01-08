@@ -6,13 +6,24 @@ var constants = (function () {
       'c56f33fc6ecfcd0c225c4ab356fee59390af8560be0e930faebe74a6daff7c9b': 'NEO',
       GAS: 'GAS',
       '602c79718b16e442de58778e148d0b1084e3b2dffd5de6b7b16cee7969282de7': 'GAS'
-    }
+    },
+    DEFAULT_SCRYPT: {
+      cost: 16384,
+      blockSize: 8,
+      parallel: 8,
+      size: 64
+    },
+    NEP_HEADER: '0142',
+    NEP_FLAG: 'e0'
   }
 })();
 
 var utils = (function (constants) {
   var _BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
   var _base58 = module.baseX(_BASE58);
+  function _generatePrivateKey() {
+    return ab2hexstring(secureRandom(32));
+  }
   function _getScriptHashFromAddress(address) {
     var hash = ab2hexstring(_base58.decode(address));
     return reverseHex(hash.substr(2, 40));
@@ -97,7 +108,24 @@ var utils = (function (constants) {
     var address = _toAddress(hexstring2ab(programHash.toString()));
     return address;
   }
+  function _hexXor(str1, str2) {
+    if (typeof str1 !== 'string' || typeof str2 !== 'string') {
+      throw new Error('hexXor expects hex strings');
+    }
+    if (str1.length !== str2.length) {
+      throw new Error('strings are disparate lengths');
+    }
+    if (str1.length % 2 !== 0) {
+      throw new Error('strings must be hex');
+    }
+    var result = [];
+    for (let i = 0; i < str1.length; i += 2) {
+      result.push(parseInt(str1.substr(i, 2), 16) ^ parseInt(str2.substr(i, 2), 16))
+    }
+    return ab2hexstring(result)
+  }
   return {
+    generatePrivateKey: _generatePrivateKey,
     getPrivateKeyFromWIF: _getPrivateKeyFromWIF,
     getAddressFromPrivateKey: _getAddressFromPrivateKey,
     getVerificationScriptFromPublicKey: _getVerificationScriptFromPublicKey,
@@ -106,6 +134,7 @@ var utils = (function (constants) {
     getScriptHashFromAddress: _getScriptHashFromAddress,
     isAddress: _isAddress,
     base58: _base58,
+    hexXor: _hexXor,
     sleep: function (time) {
       return new Promise(function(resolve) {
         setTimeout(resolve, time);
@@ -113,6 +142,84 @@ var utils = (function (constants) {
     }
   }
 })(constants);
+
+var nep2 = (function () {
+  function _ensureScryptParams (params) {
+    return Object.assign({}, constants.DEFAULT_SCRYPT, params);
+  }
+  function _encrypt (wifKey, keyphrase, scryptParams) {
+    if (scryptParams === undefined) {
+      scryptParams = constants.DEFAULT_SCRYPT;
+    }
+    var privateKey = utils.getPrivateKeyFromWIF(wifKey);
+    var address = utils.getAddressFromPrivateKey(privateKey);
+    scryptParams = _ensureScryptParams(scryptParams);
+    // SHA Salt (use the first 4 bytes)
+    var SHA256 = module.CryptoJS.SHA256;
+    var enc = module.CryptoJS.enc;
+    var Buffer = module.Buffer;
+    var scrypt = module.scrypt;
+    var AES = module.CryptoJS.AES;
+    var mode = module.CryptoJS.mode;
+    var pad = module.CryptoJS.pad;
+    var bs58check = module.bs58check;
+    var addressHash = SHA256(SHA256(enc.Latin1.parse(address))).toString().slice(0, 8);
+    // Scrypt
+    var derived = scrypt.hashSync(
+      Buffer.from(keyphrase.normalize('NFC'), 'utf8'),
+      Buffer.from(addressHash, 'hex'),
+      scryptParams
+    ).toString('hex');
+    var derived1 = derived.slice(0, 64);
+    var derived2 = derived.slice(64);
+    // AES Encrypt
+    var xor = utils.hexXor(privateKey, derived1);
+    var encrypted = AES.encrypt(
+      enc.Hex.parse(xor),
+      enc.Hex.parse(derived2),
+      { mode: mode.ECB, padding: pad.NoPadding }
+    );
+    // Construct
+    var assembled = constants.NEP_HEADER + constants.NEP_FLAG + addressHash + encrypted.ciphertext.toString();
+    return bs58check.encode(Buffer.from(assembled, 'hex'));
+  }
+  function _decrypt (encryptedKey, keyphrase, scryptParams) {
+    if (scryptParams === undefined) {
+      scryptParams = constants.DEFAULT_SCRYPT;
+    }
+    scryptParams = _ensureScryptParams(scryptParams);
+    var SHA256 = module.CryptoJS.SHA256;
+    var enc = module.CryptoJS.enc;
+    var Buffer = module.Buffer;
+    var scrypt = module.scrypt;
+    var AES = module.CryptoJS.AES;
+    var mode = module.CryptoJS.mode;
+    var pad = module.CryptoJS.pad;
+    var bs58check = module.bs58check;
+    var assembled = ab2hexstring(bs58check.decode(encryptedKey));
+    var addressHash = assembled.substr(6, 8);
+    var encrypted = assembled.substr(-64);
+    var derived = scrypt.hashSync(
+      Buffer.from(keyphrase.normalize('NFC'), 'utf8'),
+      Buffer.from(addressHash, 'hex'),
+      scryptParams).toString('hex');
+    var derived1 = derived.slice(0, 64);
+    var derived2 = derived.slice(64);
+    var ciphertext = { ciphertext: enc.Hex.parse(encrypted), salt: '' };
+    var decrypted = AES.decrypt(
+      ciphertext,
+      enc.Hex.parse(derived2), { mode: mode.ECB, padding: pad.NoPadding });
+    var privateKey = utils.hexXor(decrypted.toString(), derived1);
+    var address = utils.getAddressFromPrivateKey(privateKey);
+    var newAddressHash = SHA256(SHA256(enc.Latin1.parse(address))).toString().slice(0, 8);
+    if (addressHash !== newAddressHash) throw new Error('Wrong Password!');
+    return [privateKey, address];
+  }
+  return {
+    encrypt: _encrypt,
+    decrypt: _decrypt
+  }
+})();
 
 var network = (function () {
   var _DEFAULT_REQ = { jsonrpc: '2.0', method: 'getblockcount', params: [], id: 1234 };
@@ -684,7 +791,71 @@ var walletCore = (function (utils, components, exclusive, network, balanceManage
       }
     });
   }
-  // https://github.com/neotracker/neotracker-wallet/blob/6c612de7f38c80689260112cb271804f063a6b1c/src/wallet/shared/neon/index.js
+  function _initWallet (privateKeyWIF) {
+    _privateKey = utils.getPrivateKeyFromWIF(privateKeyWIF);
+    _address = utils.getAddressFromPrivateKey(_privateKey);
+    console.log("Wallet initialized - address: (" + _address + "), network: (" + network.getNetType() + ")");
+    $('.wallet-summary-card').find('.-refresh-button').click(function () {
+      $(this).attr('disabled', true);
+      _refreshWallet();
+    });
+    $('.wallet-summary-card').find('.-claim-gas').click(function () {
+      transactionProcessModal.display();
+      transactionProcessModal.addProgress('Started claiming gas.');
+      transactionProcessModal.addProgress('Sending NEO to self.');
+      var neoToSelfTransactionHash = null;
+      var stateFunctions = {
+        successfully_built: function () {
+          transactionProcessModal.addProgress('Transaction successfully built.');
+        },
+        successfully_signed: function () {
+          transactionProcessModal.addProgress('Transaction successfully signed. Broadcasting transaction...');
+        },
+        successfully_returned: function (hash) {
+          neoToSelfTransactionHash = hash;
+          transactionProcessModal.addProgress(
+            'Transaction added to mempool. Transaction hash:<div class=\'-transaction-hash\'><a target=\'_blank\' href=\'https://neoexplorer.co/transactions/' + hash + '\'>' + hash + '</a></div>'
+          );
+        },
+        error_validator_rejected: function () {
+          transactionProcessModal.error(
+            'Transaction was rejected. Did you recently send a transaction? Wait for the transaction to be confirmed first. Refresh the page and try again.'
+          );
+        }
+      };
+      walletCore.doSendAsset(
+        _address,
+        { ['NEO']: 1 },
+        stateFunctions
+      ).then(function () {
+        transactionProcessModal.addProgress('Waiting for transaction to confirm...');
+        _waitForTransactionToConfirm(
+          neoToSelfTransactionHash,
+          function () {
+            transactionProcessModal.addProgress('Transaction confirmed.');
+            stateFunctions.successfully_returned = function (hash) {
+              transactionProcessModal.addProgress(
+                'Transaction added to mempool. Transaction hash:<div class=\'-transaction-hash\'><a target=\'_blank\' href=\'https://neoexplorer.co/transactions/' + hash + '\'>' + hash + '</a></div>'
+              );
+              transactionProcessModal.complete('Gas will be claimed after the transaction is confirmed.');
+            }
+            transactionProcessModal.addProgress('Sending Claim Gas transaction.');
+            walletCore.doClaimAllGas(stateFunctions).catch(function (reason) {
+              transactionProcessModal.error(reason.message);
+              console.log(reason);
+            });
+          },
+          function () {
+            transactionProcessModal.error('Transaction failed to confirm.');
+          }
+        );
+      }).catch(function (reason) {
+        transactionProcessModal.error(reason.message);
+        console.log(reason);
+      });
+    });
+    _refreshWallet();
+  }
   return {
     doSendAsset: function (to, assetsToSend, stateFunctions) {
       return _doSendAsset(to, _address, assetsToSend, stateFunctions);
@@ -701,71 +872,7 @@ var walletCore = (function (utils, components, exclusive, network, balanceManage
       _privateKey = null;
       _transactionHistory = null;
     },
-    initWallet: function (privateKeyWIF) {
-      _privateKey = utils.getPrivateKeyFromWIF(privateKeyWIF);
-      _address = utils.getAddressFromPrivateKey(_privateKey);
-      console.log("Wallet initialized - address: (" + _address + "), network: (" + network.getNetType() + ")");
-      $('.wallet-summary-card').find('.-refresh-button').click(function () {
-        $(this).attr('disabled', true);
-        _refreshWallet();
-      });
-      $('.wallet-summary-card').find('.-claim-gas').click(function () {
-        transactionProcessModal.display();
-        transactionProcessModal.addProgress('Started claiming gas.');
-        transactionProcessModal.addProgress('Sending NEO to self.');
-        var neoToSelfTransactionHash = null;
-        var stateFunctions = {
-          successfully_built: function () {
-            transactionProcessModal.addProgress('Transaction successfully built.');
-          },
-          successfully_signed: function () {
-            transactionProcessModal.addProgress('Transaction successfully signed. Broadcasting transaction...');
-          },
-          successfully_returned: function (hash) {
-            neoToSelfTransactionHash = hash;
-            transactionProcessModal.addProgress(
-              'Transaction added to mempool. Transaction hash:<div class=\'-transaction-hash\'><a target=\'_blank\' href=\'https://neoexplorer.co/transactions/' + hash + '\'>' + hash + '</a></div>'
-            );
-          },
-          error_validator_rejected: function () {
-            transactionProcessModal.error(
-              'Transaction was rejected. Did you recently send a transaction? Wait for the transaction to be confirmed first. Refresh the page and try again.'
-            );
-          }
-        };
-        walletCore.doSendAsset(
-          _address,
-          { ['NEO']: 1 },
-          stateFunctions
-        ).then(function () {
-          transactionProcessModal.addProgress('Waiting for transaction to confirm...');
-          _waitForTransactionToConfirm(
-            neoToSelfTransactionHash,
-            function () {
-              transactionProcessModal.addProgress('Transaction confirmed.');
-              stateFunctions.successfully_returned = function (hash) {
-                transactionProcessModal.addProgress(
-                  'Transaction added to mempool. Transaction hash:<div class=\'-transaction-hash\'><a target=\'_blank\' href=\'https://neoexplorer.co/transactions/' + hash + '\'>' + hash + '</a></div>'
-                );
-                transactionProcessModal.complete('Gas will be claimed after the transaction is confirmed.');
-              }
-              transactionProcessModal.addProgress('Sending Claim Gas transaction.');
-              walletCore.doClaimAllGas(stateFunctions).catch(function (reason) {
-                transactionProcessModal.error(reason.message);
-                console.log(reason);
-              });
-            },
-            function () {
-              transactionProcessModal.error('Transaction failed to confirm.');
-            }
-          );
-        }).catch(function (reason) {
-          transactionProcessModal.error(reason.message);
-          console.log(reason);
-        });
-      });
-      _refreshWallet();
-    },
+    initWallet: _initWallet,
     refreshWallet: _refreshWallet
   }
 })(utils, components, exclusive, network, balanceManager);
@@ -991,6 +1098,8 @@ function refresh_open_wallet_menu(value) {
   $('.open-wallet-menu').hide();
   if (value === 'private_key') {
     $('.private-key-form').show();
+  } else if (value === 'encrypted_private_key') {
+    $('.encrypted-private-key-form').show();
   }
 }
 
@@ -1024,8 +1133,14 @@ $(function () {
   $('input[type=radio][name=open_wallet_radio]').change(function() {
     refresh_open_wallet_menu(this.value);
   });
-  $('input[type=radio][name=open_wallet_radio][value=private_key]').attr('checked', true);
-  $('input[type=radio][name=open_wallet_radio][value=private_key]').change();
+  $('input[type=radio][name=open_wallet_radio][value=encrypted_private_key]').attr('checked', true);
+  $('input[type=radio][name=open_wallet_radio][value=encrypted_private_key]').change();
+  $('.encrypted-private-key-form').submit(function () {
+    var $this = $(this);
+    alert($this.find('.-encrypted-private-key-value').val());
+    alert($this.find('.-password-value').val());
+    return false;
+  });
   $('.private-key-form').submit(function () {
     var $this = $(this);
     walletCore.initWallet($this.find('.-private-key-value').val());
