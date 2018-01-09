@@ -70,56 +70,6 @@ var stringToBytes = function(str) {
   return arr;
 }
 
-var getTransferTxData = function(txData) {
-  var ba = new module.Buffer(txData, "hex");
-  var Transaction = () => {
-    this.type = 0;
-    this.version = 0;
-    this.attributes = "";
-    this.inputs = [];
-    this.outputs = [];
-  };
-  var tx = new Transaction();
-  // Transfer Type
-  if (ba[0] != 0x80) return;
-  tx.type = ba[0];
-  // Version
-  tx.version = ba[1];
-  // Attributes
-  var k = 2;
-  var len = ba[k];
-  for (i = 0; i < len; i++) {
-    k = k + 1;
-  }
-  // Inputs
-  k = k + 1;
-  len = ba[k];
-  for (i = 0; i < len; i++) {
-    tx.inputs.push({
-      txid: ba.slice(k + 1, k + 33),
-      index: ba.slice(k + 33, k + 35)
-    });
-    //console.log( "txid:", tx.inputs[i].txid );
-    //console.log( "index:", tx.inputs[i].index );
-    k = k + 34;
-  }
-  // Outputs
-  k = k + 1;
-  len = ba[k];
-  for (i = 0; i < len; i++) {
-    tx.outputs.push({
-      assetid: ba.slice(k + 1, k + 33),
-      value: ba.slice(k + 33, k + 41),
-      scripthash: ba.slice(k + 41, k + 61)
-    });
-    //console.log( "outputs.assetid:", tx.outputs[i].assetid );
-    //console.log( "outputs.value:", tx.outputs[i].value );
-    //console.log( "outputs.scripthash:", tx.outputs[i].scripthash );
-    k = k + 60;
-  }
-  return tx;
-}
-
 var reverseHex = function(hex) {
   if (typeof hex !== 'string') throw new Error('reverseHex expects a string');
   if (hex.length % 2 !== 0) throw new Error('Incorrect Length: ' + hex);
