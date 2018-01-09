@@ -74,7 +74,7 @@ var reverseHex = function(hex) {
   if (typeof hex !== 'string') throw new Error('reverseHex expects a string');
   if (hex.length % 2 !== 0) throw new Error('Incorrect Length: ' + hex);
   var out = '';
-  for (let i = hex.length - 2; i >= 0; i -= 2) {
+  for (var i = hex.length - 2; i >= 0; i -= 2) {
     out += hex.substr(i, 2)
   }
   return out;

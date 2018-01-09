@@ -122,7 +122,7 @@ var utils = (function (constants) {
       throw new Error('strings must be hex');
     }
     var result = [];
-    for (let i = 0; i < str1.length; i += 2) {
+    for (var i = 0; i < str1.length; i += 2) {
       result.push(parseInt(str1.substr(i, 2), 16) ^ parseInt(str2.substr(i, 2), 16))
     }
     return ab2hexstring(result)
