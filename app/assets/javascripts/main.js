@@ -227,44 +227,29 @@ var nep2 = (function (utils) {
 
 var network = (function () {
   var _DEFAULT_REQ = { jsonrpc: '2.0', method: 'getblockcount', params: [], id: 1234 };
-  var _netType = 'MainNet';
-  function _getAPIEndpoint(net) {
-    switch(net) {
-      case 'MainNet':
-        return 'http://api.wallet.cityofzion.io'
-      case 'TestNet':
-        return 'http://testnet-api.wallet.cityofzion.io'
-      default:
-        return net
-    }
-  }
+  var _netType = 'MainNet'; // TestNet
   function _getBalance(address) {
-    var apiEndpoint = _getAPIEndpoint(_netType);
-    return axios.get(apiEndpoint + '/v2/address/balance/' + address).then(function(res) {
+    return axios.get('/neo-wallet-api/get-balance/' + address + '?net_type=' + _netType).then(function(res) {
       return res.data;
     });
   }
   function _getClaims(address) {
-    var apiEndpoint = _getAPIEndpoint(_netType);
-    return axios.get(apiEndpoint + '/v2/address/claims/' + address).then(function(res) {
+    return axios.get('/neo-wallet-api/get-claims/' + address + '?net_type=' + _netType).then(function(res) {
       return res.data
     });
   }
   function _getRPCEndpoint() {
-    var apiEndpoint = _getAPIEndpoint(_netType);
-    return axios.get(apiEndpoint + '/v2/network/best_node').then(function(response) {
+    return axios.get('/neo-wallet-api/get-rpc-endpoint/' + '?net_type=' + _netType).then(function(response) {
       return response.data.node
     });
   }
   function _getTransactionHistory(address) {
-    var apiEndpoint = _getAPIEndpoint(_netType);
-    return axios.get(apiEndpoint + '/v2/address/history/' + address).then(function(response) {
+    return axios.get('/neo-wallet-api/get-transaction-history/' + address + '?net_type=' + _netType).then(function(response) {
       return response.data.history
     });
   }
   function _getTransaction(transactionId) {
-    var apiEndpoint = _getAPIEndpoint(_netType);
-    return axios.get(apiEndpoint + '/v2/transaction/' + transactionId).then(function(response) {
+    return axios.get('/neo-wallet-api/get-transaction/' + transactionId + '?net_type=' + _netType).then(function(response) {
       return response.data;
     });
   }
@@ -301,7 +286,6 @@ var network = (function () {
     });
   }
   return {
-    getAPIEndpoint: _getAPIEndpoint,
     getBalance: _getBalance,
     getClaims: _getClaims,
     getRPCEndpoint: _getRPCEndpoint,
@@ -647,16 +631,10 @@ var walletCore = (function (utils, components, exclusive, network, balanceManage
       }
     });
     var signedTx = null;
-    var endPoint = null;
-    return Promise.all([
-      network.getRPCEndpoint(),
-      network.getBalance(_address).then(function (netBal) {
-        balanceManager.update(netBal);
-        return balanceManager.getBalance();
-      })
-    ]).then(function (values) {
-      endPoint = values[0];
-      var balance = values[1];
+    return network.getBalance(_address).then(function (netBal) {
+      balanceManager.update(netBal);
+      return balanceManager.getBalance();
+    }).then(function (balance) {
       var unsignedTx = Transaction.createContractTx(balance, intents);
       if (stateFunctions !== undefined) {
         stateFunctions.successfully_built();
@@ -667,7 +645,7 @@ var walletCore = (function (utils, components, exclusive, network, balanceManage
         stateFunctions.successfully_signed();
       }
       signedTx = signedResult;
-      return network.sendRawTransaction(components.serializeTransaction(signedTx)).execute(endPoint);
+      return network.sendRawTransaction(components.serializeTransaction(signedTx)).execute('/neo-wallet-api/sendrawtransaction');
     }).then(function (res) {
       if (res.result === true) {
         res.txid = signedTx.hash();
@@ -682,10 +660,7 @@ var walletCore = (function (utils, components, exclusive, network, balanceManage
   }
   function _doClaimAllGas(address, stateFunctions) {
     var signedTx = null;
-    var endPoint = null;
-    return Promise.all([network.getRPCEndpoint(), network.getClaims(address)]).then(function (values) {
-      endPoint = values[0];
-      var claimsData = values[1];
+    return network.getClaims(address).then(function (claimsData) {
       if (claimsData.claims.length === 0) {
         throw new Error('No claimable gas!');
       }
@@ -699,7 +674,7 @@ var walletCore = (function (utils, components, exclusive, network, balanceManage
         stateFunctions.successfully_signed();
       }
       signedTx = signedResult;
-      return network.sendRawTransaction(components.serializeTransaction(signedTx)).execute(endPoint);
+      return network.sendRawTransaction(components.serializeTransaction(signedTx)).execute('/neo-wallet-api/sendrawtransaction');
     }).then(function (res) {
       if (res.result === true) {
         res.txid = signedTx.hash();
