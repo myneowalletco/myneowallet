@@ -134,6 +134,7 @@ var utils = (function (constants) {
     getVerificationScriptFromPublicKey: _getVerificationScriptFromPublicKey,
     getPublicKeyFromPrivateKey: _getPublicKeyFromPrivateKey,
     isPrivateKey: _isPrivateKey,
+    isPrivateKeyWIF: _isPrivateKeyWIF,
     getScriptHashFromAddress: _getScriptHashFromAddress,
     getWIFFromPrivateKey: _getWIFFromPrivateKey,
     isAddress: _isAddress,
@@ -770,69 +771,73 @@ var walletCore = (function (utils, components, exclusive, network, balanceManage
       }
     });
   }
+  var _ui_setup = false;
   function _initWallet (privateKeyWIF) {
     _privateKey = utils.getPrivateKeyFromWIF(privateKeyWIF);
     _address = utils.getAddressFromPrivateKey(_privateKey);
     console.log("Wallet initialized - address: (" + _address + "), network: (" + network.getNetType() + ")");
-    $('.wallet-summary-card').find('.-refresh-button').click(function () {
-      $(this).attr('disabled', true);
-      _refreshWallet();
-    });
-    $('.wallet-summary-card').find('.-claim-gas').click(function () {
-      transactionProcessModal.display();
-      transactionProcessModal.addProgress('Started claiming gas.');
-      transactionProcessModal.addProgress('Sending NEO to self.');
-      var neoToSelfTransactionHash = null;
-      var stateFunctions = {
-        successfully_built: function () {
-          transactionProcessModal.addProgress('Transaction successfully built.');
-        },
-        successfully_signed: function () {
-          transactionProcessModal.addProgress('Transaction successfully signed. Broadcasting transaction...');
-        },
-        successfully_returned: function (hash) {
-          neoToSelfTransactionHash = hash;
-          transactionProcessModal.addProgress(
-            'Transaction added to mempool. Transaction hash:<div class=\'-transaction-hash\'><a target=\'_blank\' href=\'https://neoexplorer.co/transactions/' + hash + '\'>' + hash + '</a></div>'
-          );
-        },
-        error_validator_rejected: function () {
-          transactionProcessModal.error(
-            'Transaction was rejected. Did you recently send a transaction? Wait for the transaction to be confirmed first. Refresh the page and try again.'
-          );
-        }
-      };
-      walletCore.doSendAsset(
-        _address,
-        { ['NEO']: 1 },
-        stateFunctions
-      ).then(function () {
-        transactionProcessModal.addProgress('Waiting for transaction to confirm...');
-        _waitForTransactionToConfirm(
-          neoToSelfTransactionHash,
-          function () {
-            transactionProcessModal.addProgress('Transaction confirmed.');
-            stateFunctions.successfully_returned = function (hash) {
-              transactionProcessModal.addProgress(
-                'Transaction added to mempool. Transaction hash:<div class=\'-transaction-hash\'><a target=\'_blank\' href=\'https://neoexplorer.co/transactions/' + hash + '\'>' + hash + '</a></div>'
-              );
-              transactionProcessModal.complete('Gas will be claimed after the transaction is confirmed.');
-            }
-            transactionProcessModal.addProgress('Sending Claim Gas transaction.');
-            walletCore.doClaimAllGas(stateFunctions).catch(function (reason) {
-              transactionProcessModal.error(reason.message);
-              console.log(reason);
-            });
-          },
-          function () {
-            transactionProcessModal.error('Transaction failed to confirm.');
-          }
-        );
-      }).catch(function (reason) {
-        transactionProcessModal.error(reason.message);
-        console.log(reason);
+    if (!_ui_setup) {
+      _ui_setup = true;
+      $('.wallet-summary-card').find('.-refresh-button').click(function () {
+        $(this).attr('disabled', true);
+        _refreshWallet();
       });
-    });
+      $('.wallet-summary-card').find('.-claim-gas').click(function () {
+        transactionProcessModal.display();
+        transactionProcessModal.addProgress('Started claiming gas.');
+        transactionProcessModal.addProgress('Sending NEO to self.');
+        var neoToSelfTransactionHash = null;
+        var stateFunctions = {
+          successfully_built: function () {
+            transactionProcessModal.addProgress('Transaction successfully built.');
+          },
+          successfully_signed: function () {
+            transactionProcessModal.addProgress('Transaction successfully signed. Broadcasting transaction...');
+          },
+          successfully_returned: function (hash) {
+            neoToSelfTransactionHash = hash;
+            transactionProcessModal.addProgress(
+              'Transaction added to mempool. Transaction hash:<div class=\'-transaction-hash\'><a target=\'_blank\' href=\'https://neoexplorer.co/transactions/' + hash + '\'>' + hash + '</a></div>'
+            );
+          },
+          error_validator_rejected: function () {
+            transactionProcessModal.error(
+              'Transaction was rejected. Did you recently send a transaction? Wait for the transaction to be confirmed first. Refresh the page and try again.'
+            );
+          }
+        };
+        walletCore.doSendAsset(
+          _address,
+          { ['NEO']: 1 },
+          stateFunctions
+        ).then(function () {
+          transactionProcessModal.addProgress('Waiting for transaction to confirm...');
+          _waitForTransactionToConfirm(
+            neoToSelfTransactionHash,
+            function () {
+              transactionProcessModal.addProgress('Transaction confirmed.');
+              stateFunctions.successfully_returned = function (hash) {
+                transactionProcessModal.addProgress(
+                  'Transaction added to mempool. Transaction hash:<div class=\'-transaction-hash\'><a target=\'_blank\' href=\'https://neoexplorer.co/transactions/' + hash + '\'>' + hash + '</a></div>'
+                );
+                transactionProcessModal.complete('Gas will be claimed after the transaction is confirmed.');
+              }
+              transactionProcessModal.addProgress('Sending Claim Gas transaction.');
+              walletCore.doClaimAllGas(stateFunctions).catch(function (reason) {
+                transactionProcessModal.error(reason.message);
+                console.log(reason);
+              });
+            },
+            function () {
+              transactionProcessModal.error('Transaction failed to confirm.');
+            }
+          );
+        }).catch(function (reason) {
+          transactionProcessModal.error(reason.message);
+          console.log(reason);
+        });
+      });
+    }
     _refreshWallet();
   }
   function _createWallet(password) {
@@ -1203,9 +1208,13 @@ $(function () {
   });
   $('.private-key-form').submit(function () {
     var $this = $(this);
-    walletCore.initWallet($this.find('.-private-key-value').val());
-    clearAuthForms();
-    switch_ui_mode(UI_MODES[3]);
+    if (!utils.isPrivateKeyWIF($this.find('.-private-key-value').val())) {
+      errorModal.display('Failed to open wallet', 'Not a valid WIF private key.');
+    } else {
+      walletCore.initWallet($this.find('.-private-key-value').val());
+      clearAuthForms();
+      switch_ui_mode(UI_MODES[3]);
+    }
     return false;
   });
   $('.new-wallet-form').submit(function () {
