@@ -1142,6 +1142,15 @@ function refresh_ui() {
 
 function switch_ui_mode(new_ui_mode) {
   ui_mode = new_ui_mode;
+  var event_label = '';
+  if (walletCore.getAddress() !== null) {
+    event_label = walletCore.getAddress();
+  }
+  gtag('event', 'new-ui-mode', {
+    'event_category': UI_MODE_DATA[ui_mode]['class'],
+    'event_action': 'click',
+    'event_label': event_label
+  });
   refresh_ui();
 }
 
