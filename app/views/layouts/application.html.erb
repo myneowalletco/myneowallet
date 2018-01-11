@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Myneowallet</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyNEOWallet.info</title>
+    <meta name="description" content="MyNEOWallet is an open-source, secure, and free online utility for generating NEO wallets, sending and receiving NEO transactions, and claiming GAS.">
+    <meta property="og:title" content="MyNEOWallet.info: Open-source and secure online NEO wallet" />
+    <meta property="og:description" content="MyNEOWallet is an open-source, secure, and free online utility for generating NEO wallets, sending and receiving NEO transactions, and claiming GAS." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="<%= current_url_no_params %>" />
+    <meta property="og:image" content="<%= asset_path 'neo_background.jpg' %>" />
     <%= csrf_meta_tags %>
     <%= stylesheet_link_tag    'application', media: 'all' %>
     <%= javascript_include_tag 'application' %>

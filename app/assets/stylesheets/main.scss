@@ -11,7 +11,8 @@ body {
   background-image: url("https://i0.wp.com/www.allcryptocurrencies.news/wp-content/uploads/2017/12/wp-header-logo-1763.png?fit=1920%2C1080&ssl=1");
   background-repeat: no-repeat;
   background-attachment: fixed;
-  background-position: center;
+  background-position: center center;
+  background-size: cover;
 }
 
 header {
@@ -153,26 +154,34 @@ form {
           margin-right: 8px;
         }
       }
-      .-warning {
-        margin-top: 24px;
-        font-weight: 300;
-        font-size: 18px;
-      }
-      .-github-notice {
-        margin-top: 18px;
-        font-weight: 300;
-        font-size: 18px;
-        .fa-github {
-          font-size: 28px;
-          margin-right: 3px;
-        }
-      }
     }
     .-bookmark-notice {
       font-weight: 300;
       font-size: 18px;
       text-align: center;
       .fa-exclamation-triangle {
+        font-size: 28px;
+        margin-right: 3px;
+      }
+    }
+  }
+  .intro-card {
+    .-warning {
+      margin-top: 24px;
+    }
+    .-github-notice {
+      margin-top: 18px;
+    }
+  }
+  .intro-card, .open-wallet-card {
+    .-warning {
+      font-weight: 300;
+      font-size: 18px;
+    }
+    .-github-notice {
+      font-weight: 300;
+      font-size: 18px;
+      .fa-github {
         font-size: 28px;
         margin-right: 3px;
       }
