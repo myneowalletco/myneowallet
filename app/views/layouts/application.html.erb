@@ -11,9 +11,11 @@
     <meta property="og:image" content="<%= asset_path 'neo_background.jpg' %>" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:creator" content="@neoonlinewallet" />
+    <meta name="twitter:image" content="<%= asset_path 'neo_background.jpg' %>" />
     <%= csrf_meta_tags %>
     <%= stylesheet_link_tag    'application', media: 'all' %>
     <%= javascript_include_tag 'application' %>
+    <%= favicon_link_tag asset_path("favicon.png") %>
     <!-- Global site tag (gtag.js) - Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=UA-112244484-1"></script>
     <script>
